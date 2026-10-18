@@ -85,7 +85,7 @@ Komi 内置 KataGo 引擎与神经网络权重，所有思考都在你本机的�
 
 ### 方式一：安装包（推荐给最终用户）
 
-双击 `dist\\Komi-0.4.2.msi`（**96 MB**），安装向导全中文，按 WiX 官方界面规范走四步：
+双击 `dist\\Komi-1.0.1.msi`（**96 MB**），安装向导全中文，按 WiX 官方界面规范走四步：
 
 ```
 欢迎使用 Komi 安装向导
@@ -287,7 +287,7 @@ npm start                # 启动
 `%LOCALAPPDATA%\Programs\Komi`。需要换位置时用静默安装参数：
 
 ```bat
-msiexec /i "Komi-0.4.2.msi" /qn APPLICATIONFOLDER="D:\Games\Komi"
+msiexec /i "Komi-1.0.1.msi" /qn APPLICATIONFOLDER="D:\Games\Komi"
 ```
 
 **下载的组件默认跟着安装目录走**（装在 `<安装目录>\engine\`），装到 D 盘时 250 MB 的权重与后端也落在 D 盘。
