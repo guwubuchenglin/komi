@@ -1188,8 +1188,9 @@
   async function ensureComponentsThenStart() {
     try {
       const setup = await api.setupCheck();
-      const missing = (setup?.candidates ?? []).filter((c) => c.applicable || c.required);
-      if (missing.length > 0) {
+      // 只有「必需组件」缺失才进安装向导；可选加速包缺失不该拦着用户
+      const missingRequired = (setup?.candidates ?? []).filter((c) => c.required && c.applicable !== false);
+      if (missingRequired.length > 0) {
         showSetupWizard(setup);
         return false;
       }

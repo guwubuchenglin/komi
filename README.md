@@ -388,7 +388,7 @@ npm run dist:dir      # 只出免安装目录（dist/win-unpacked）
 ## 目录结构
 
 ```
-go-game/
+Komi/
 ├── Komi.exe              # 双击启动器（21 KB，带图标）
 ├── docs/preview.png          # 界面预览图
 ├── assets/app.ico            # 应用图标（构建脚本生成）
