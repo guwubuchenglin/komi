@@ -46,7 +46,7 @@ async function resolvePypi(pkg, mirror = 'direct') {
   }
 
   const res = await fetch(`https://pypi.org/pypi/${pkg}/json`, {
-    headers: { 'User-Agent': 'go-game-installer/1.0' },
+    headers: { 'User-Agent': 'komi-installer/1.0' },
   });
   if (!res.ok) throw new Error(`无法解析 ${pkg}: HTTP ${res.status}`);
   const json = await res.json();
@@ -311,7 +311,7 @@ export async function installComponent(comp, engineRoot, onProgress, options = {
     const failures = [];
     for (const cand of urls) {
       try {
-        const r = await fetch(cand, { redirect: 'follow', headers: { 'User-Agent': 'go-game-installer/1.0' } });
+        const r = await fetch(cand, { redirect: 'follow', headers: { 'User-Agent': 'komi-installer/1.0' } });
         if (!r.ok) {
           failures.push(`${cand} → HTTP ${r.status}`);
           continue;

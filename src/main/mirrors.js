@@ -56,7 +56,7 @@ export function candidateUrls(url, mode) {
  */
 export async function resolvePypiViaMirror(pkg) {
   const url = `${PYPI_MIRROR.simple}/${pkg}/`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'go-game-installer/1.0' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'komi-installer/1.0' } });
   if (!res.ok) return null;
   const html = await res.text();
 

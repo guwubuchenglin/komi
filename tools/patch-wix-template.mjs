@@ -1,7 +1,7 @@
 // 构建前修补 electron-builder 的 WiX 模板（按 WiX 官方界面规范 WixUI_InstallDir）：
 //  1) 界面语言 → 简体中文（2052，配合 electron-builder.yml 的 -cultures:zh-CN）
 //  2) 默认安装范围 = 每台计算机 → 官方流程里"安装范围"页之后会出现"安装位置"页（可改目录）
-//  3) 安装文件夹名固定为中文（productName 含中文时 electron-builder 会退回 name=go-game）
+//  3) 安装文件夹名固定为中文（中文 productName 会被 sanitize，需单独指定目录名）
 import { readFile, writeFile, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';

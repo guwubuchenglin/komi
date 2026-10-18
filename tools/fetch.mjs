@@ -21,7 +21,7 @@ let lastPct = -1;
 try {
   const res = await fetch(url, {
     redirect: "follow",
-    headers: { "User-Agent": "go-game-fetch/1.0" },
+    headers: { "User-Agent": "komi-fetch/1.0" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
 
