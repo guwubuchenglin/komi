@@ -57,8 +57,9 @@ export function tuningFor({
   // 留一个核给系统与界面线程；多个引擎平分；上限 16（再多收益很小，实测 24~64 线程只比 16 快 30%）
   const usable = Math.max(2, (cores || 2) - 1);
   const per = Math.max(2, Math.min(16, Math.floor(usable / Math.max(1, engines))));
-  // CUDA 攒大批次收益最好；OpenCL / DirectML 要为新的批次大小编译内核，批次保守一点，避免首次运行过慢
-  const batch = backendId === 'cuda' ? (per >= 12 ? 24 : 16) : 16;
+  // CUDA 攒大批次收益最好；OpenCL / DirectML 要为每个新批次大小调优/编译内核，
+  // 批次保持原值 8，避免复盘、观战途中被长时间的内核编译卡住
+  const batch = backendId === 'cuda' ? (per >= 12 ? 24 : 16) : 8;
   return {
     mode: normalized,
     numSearchThreads: per,

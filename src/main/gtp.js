@@ -143,8 +143,12 @@ export class GtpEngine extends EventEmitter {
    * 没有 rootInfo 行；根节点的胜率取该行 order 0 的候选点。
    * 因此这里持续监听正文行，累计访问数达标后写空行结束分析。
    */
-  async analyzePosition({ minVisits = 200, maxMs = 600, timeoutMs = 30000, intervalMs = 20 } = {}) {
+  // 注意：KataGo 的 `kata-analyze interval N` 里 N 的单位是**厘秒**（1/100 秒），
+  // 不是毫秒。旧参数名 intervalMs 有误导性，这里改为 intervalCs；
+  // 并且强制它不超过评估预算的 1/5，否则可能出现「一次更新都等不到就被停掉」→ 胜率全空。
+  async analyzePosition({ minVisits = 200, maxMs = 600, timeoutMs = 30000, intervalCs = 20 } = {}) {
     if (!this.proc) throw new Error('引擎未启动');
+    const cs = Math.max(1, Math.min(Math.round(intervalCs), Math.max(1, Math.floor(maxMs / 5))));
 
     let bestInfos = null;
     let latestVisits = 0;
@@ -175,7 +179,7 @@ export class GtpEngine extends EventEmitter {
     const timer = setTimeout(stopAnalyze, timeoutMs);
 
     try {
-      const body = await this.command(`kata-analyze interval ${intervalMs}`, timeoutMs + 20000);
+      const body = await this.command(`kata-analyze interval ${cs}`, timeoutMs + 20000);
       // 正文最后一条更新是最新数据，作为兜底
       const lines = String(body).split('\n').filter((l) => l.trim().startsWith('info '));
       const last = lines[lines.length - 1];

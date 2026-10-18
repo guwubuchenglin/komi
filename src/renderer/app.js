@@ -1778,13 +1778,14 @@
       });
       S.review.timeline = r.timeline;
       S.review.blunders = detectBlunders(g, r.timeline);
+      if (r.retries > 0) log(`复盘过程中引擎重启并续跑 ${r.retries} 次（已自动恢复，结果完整）`);
       S.winrateHist = r.timeline
         .filter((t) => t.blackWin != null)
         .map((t) => ({ move: t.index, blackWin: t.blackWin }));
       renderBlunders();
       el("reviewStatus").textContent = `复盘完成：${g.moves.length} 手，${S.review.blunders.length} 个恶手（${(
         r.elapsedMs / 1000
-      ).toFixed(1)}s）`;
+      ).toFixed(1)}s${r.retries > 0 ? `，自动重试 ${r.retries} 次` : ""}）`;
       gotoReview(0);
     } catch (err) {
       log("复盘失败：" + err.message);

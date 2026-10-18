@@ -20,6 +20,7 @@
     "exe": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-launcher.ps1",
     "test:sgf": "node scripts/test-sgf.mjs",
     "test:perf": "node scripts/test-perf.mjs",
+    "test:review": "node scripts/test-review-retry.mjs",
     "perf:engine": "npm run build:renderer && electron . --perf-test",
     "gen:sgf": "node scripts/gen-test-sgf.mjs",
     "test:all": "npm run test:rules && npm run test:sgf && npm run test:perf",

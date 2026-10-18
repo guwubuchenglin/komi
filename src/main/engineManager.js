@@ -489,10 +489,10 @@ export class EngineManager extends EventEmitter {
     return stones;
   }
 
-  /** 评估当前局面（不落子） */
-  async evaluatePosition({ visits = 200, maxMs = 600, timeoutMs = 20000 } = {}) {
+  /** 评估当前局面（不落子）。intervalCs 是 KataGo 的更新间隔，单位厘秒 */
+  async evaluatePosition({ visits = 200, maxMs = 600, timeoutMs = 20000, intervalCs = 20 } = {}) {
     const e = await this.ensureEngine();
-    const snap = await e.analyzePosition({ minVisits: visits, maxMs, timeoutMs });
+    const snap = await e.analyzePosition({ minVisits: visits, maxMs, timeoutMs, intervalCs });
     const root = snap.rootInfo ?? {};
     return {
       winrate: typeof root.winrate === 'number' ? root.winrate : null,
@@ -502,20 +502,40 @@ export class EngineManager extends EventEmitter {
     };
   }
 
+  /** 强制重启引擎（复盘等长任务自愈时用） */
+  async hardRestart() {
+    if (this.engine) {
+      await this.engine.stop().catch(() => {});
+      this.engine = null;
+      this.activeKey = null;
+    }
+    return this.ensureEngine();
+  }
+
   /**
    * 复盘扫描：按棋谱顺序逐手评估，返回每一手的局面胜率
-   * 采用「前进式」扫描（评估 → 落子 → 评估），比分步重放快得多
+   * 采用「前进式」扫描（评估 → 落子 → 评估），比分步重放快得多。
+   *
+   * 自愈：GPU 驱动/内核调优有时会让引擎短时间不应答（表现为 GTP 超时），
+   * 这时自动重启引擎、重放已完成的前缀，再从断点继续，而不是整盘作废。
    */
-  async reviewGame({ size, komi, handicap = 0, moves = [], visits = 200, perMoveMs = 600, onProgress } = {}) {
-    const e = await this.ensureEngine();
-    await e.command(`boardsize ${size}`, 30000);
-    await e.command('clear_board', 30000);
-    await e.command(`komi ${komi}`, 30000);
-
-    let stones = [];
-    if (handicap > 0) stones = await this.applyHandicap(handicap);
+  async reviewGame({
+    size,
+    komi,
+    handicap = 0,
+    moves = [],
+    visits = 200,
+    perMoveMs = 600,
+    onProgress,
+    maxRetries = 2,
+  } = {}) {
+    const coordOf = (m) => (m.pass ? 'pass' : idxToGtp(idxOf(m.x, m.y, size), size));
+    // 复盘期间每手要落子，给宽松些的超时：慢速 GPU（首次内核调优）也需要余量
+    const cmdTimeout = 60000;
 
     const timeline = [];
+    let handicapStones = [];
+
     const record = async (index, move, toPlay) => {
       const t0 = Date.now();
       const ev = await this.evaluatePosition({ visits, maxMs: perMoveMs, timeoutMs: 25000 });
@@ -540,17 +560,50 @@ export class EngineManager extends EventEmitter {
       });
     };
 
-    await record(0, null, stones.length ? 'W' : 'B');
+    /** 把引擎摆到「已落 n 手」的局面 */
+    const seek = async (n) => {
+      const e = await this.ensureEngine();
+      await e.command(`boardsize ${size}`, cmdTimeout);
+      await e.command('clear_board', cmdTimeout);
+      await e.command(`komi ${komi}`, cmdTimeout);
+      handicapStones = [];
+      if (handicap > 0) handicapStones = await this.applyHandicap(handicap);
+      for (let i = 0; i < n; i++) {
+        const m = moves[i];
+        await e.command(`play ${m.color} ${coordOf(m)}`, cmdTimeout);
+      }
+    };
 
-    for (let i = 0; i < moves.length; i++) {
-      const m = moves[i];
-      const coord = m.pass ? 'pass' : idxToGtp(idxOf(m.x, m.y, size), size);
-      await e.command(`play ${m.color} ${coord}`, 30000);
-      await record(i + 1, { ...m, gtp: coord }, m.color === 'B' ? 'W' : 'B');
-      onProgress?.({ done: i + 1, total: moves.length });
+    let attempt = 0;
+    for (;;) {
+      try {
+        if (timeline.length === 0) {
+          await seek(0);
+          await record(0, null, handicapStones.length ? 'W' : 'B');
+        }
+        for (let i = timeline.length - 1; i < moves.length; i++) {
+          const m = moves[i];
+          const coord = coordOf(m);
+          const e = await this.ensureEngine();
+          await e.command(`play ${m.color} ${coord}`, cmdTimeout);
+          await record(i + 1, { ...m, gtp: coord }, m.color === 'B' ? 'W' : 'B');
+          onProgress?.({ done: i + 1, total: moves.length });
+        }
+        return { timeline, handicapStones, retries: attempt };
+      } catch (err) {
+        const retriable = /超时|timeout|退出|EPERM|not running|进程|关闭|socket/i.test(err.message);
+        const doneMoves = Math.max(0, timeline.length - 1);
+        if (!retriable || attempt >= maxRetries) {
+          this._note(`复盘在第 ${doneMoves + 1}/${moves.length} 手失败：${err.message}`);
+          throw err;
+        }
+        attempt += 1;
+        this._note(
+          `复盘中断（${err.message.slice(0, 90)}）→ 重启引擎，从第 ${doneMoves} 手后继续（第 ${attempt} 次重试）`,
+        );
+        await this.hardRestart().catch(() => {});
+      }
     }
-
-    return { timeline, handicapStones: stones };
   }
 
   async shutdown() {

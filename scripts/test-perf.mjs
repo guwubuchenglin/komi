@@ -72,9 +72,9 @@ check('线程上限 16（再多收益很小）', () => {
   assert.equal(t.numSearchThreads, 16);
 });
 
-check('非 CUDA 后端不放大批次、不开多 NN server 线程', () => {
+check('非 CUDA 后端不改批次、不开多 NN server 线程（避免内核调优卡顿）', () => {
   const t = tuningFor({ mode: PERF.PERFORMANCE, threads: 6, engines: 1, cores: 16, backendId: 'opencl' });
-  assert.equal(t.nnMaxBatchSize, 16);
+  assert.equal(t.nnMaxBatchSize, 8);
   assert.equal(t.numNNServerThreadsPerModel, 1);
 });
 

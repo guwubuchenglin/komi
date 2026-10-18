@@ -1251,11 +1251,11 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('review:start', async (_e, opts) => {
     const t0 = Date.now();
-    const { timeline, handicapStones } = await manager.reviewGame({
+    const { timeline, handicapStones, retries } = await manager.reviewGame({
       ...opts,
       onProgress: (p) => send('review:progress', p),
     });
-    return { timeline, handicapStones, elapsedMs: Date.now() - t0 };
+    return { timeline, handicapStones, retries: retries ?? 0, elapsedMs: Date.now() - t0 };
   });
 
   // ---------------------------------------------------------------- AI 对 AI
