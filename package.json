@@ -1,0 +1,34 @@
+{
+  "name": "komi",
+  "version": "0.4.1",
+  "private": true,
+  "productName": "Komi",
+  "description": "Komi - offline Go game with local KataGo AI (adjustable strength, AI vs AI, SGF review)",
+  "author": "Komi",
+  "type": "module",
+  "main": "src/main/main.js",
+  "scripts": {
+    "build:renderer": "node tools/build-renderer.mjs",
+    "prestart": "npm run build:renderer",
+    "start": "electron .",
+    "dev": "npm run build:renderer && electron . --dev",
+    "test:rules": "node scripts/test-rules.mjs",
+    "smoke": "npm run build:renderer && node scripts/smoke-test.mjs",
+    "selftest": "npm run build:renderer && electron . --selftest",
+    "shot": "npm run build:renderer && electron . --shot",
+    "build:launcher": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-launcher.ps1",
+    "exe": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-launcher.ps1",
+    "test:sgf": "node scripts/test-sgf.mjs",
+    "gen:sgf": "node scripts/gen-test-sgf.mjs",
+    "test:all": "npm run test:rules && npm run test:sgf",
+    "dist": "npm run build:renderer && node tools/patch-wix-template.mjs && electron-builder --config build/electron-builder.yml",
+    "dist:msi": "npm run build:renderer && node tools/patch-wix-template.mjs && electron-builder --config build/electron-builder.yml --win msi",
+    "dist:dir": "npm run build:renderer && electron-builder --config build/electron-builder.yml --win dir",
+    "dist:uninstall": "msiexec /x \"dist\\Komi-0.4.1.msi\" /qn",
+    "fetch:engine": "node tools/download-engine.mjs"
+  },
+  "devDependencies": {
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.3"
+  }
+}

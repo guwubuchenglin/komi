@@ -1,0 +1,46 @@
+﻿appId: com.komi.app
+productName: Komi
+copyright: Copyright © 2026
+
+directories:
+  output: dist
+  buildResources: build
+
+asar: true
+
+# Electron 自带几十种语言包，只保留中英文
+# （约省 40 MB）
+electronLanguages:
+  - zh-CN
+  - en-US
+
+# 精简安装包：只装程序本体；引擎与权重在首次启动时下载
+files:
+  - package.json
+  - src/**/*
+  - assets/**/*
+  - docs/**/*
+  - "!**/*.map"
+  - "!**/rules.global.js.map"
+
+artifactName: "Komi-${version}.${ext}"
+
+win:
+  icon: assets/app.ico
+  target:
+    - target: msi
+      arch: [x64]
+    - target: dir
+      arch: [x64]
+
+msi:
+  oneClick: false
+  additionalLightArgs:
+    - "-cultures:zh-CN"
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: false
+  shortcutName: Komi
+
+publish: null

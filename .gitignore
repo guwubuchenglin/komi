@@ -1,0 +1,32 @@
+# 依赖与构建产物
+node_modules/
+dist/
+out/
+
+# 引擎与权重：约 1.4 GB，不提交
+# 本地需要时执行：node tools/download-engine.mjs
+engine/
+
+# 运行时生成
+config/generated/
+config/engine.json
+config/paths.json
+gtp_logs/
+engine/*/gtp_logs/
+*.log
+.pip-log.txt
+
+# 临时文件与缓存
+.tmp/
+.npm-cache/
+.electron-cache/
+.pip-cache/
+*.part
+
+# 编辑器 / 系统
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
