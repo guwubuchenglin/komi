@@ -67,7 +67,8 @@ export class SpectateRunner extends EventEmitter {
     await engines.B.setLevel(levelB);
     await this._setVisits(engines.A, visitsA);
     await this._setVisits(engines.B, visitsB);
-    this.emit('log', `对局配置：${labelA}=${levelA}  ${labelB}=${levelB}`);
+    const tag = (v) => (v ? `(${v} 访问)` : '（按档位默认访问）');
+    this.emit('log', `对局配置：${labelA}=${levelA}${tag(visitsA)}  ${labelB}=${levelB}${tag(visitsB)}`);
   }
 
   /** 观战模式：A 执黑、B 执白（单局） */

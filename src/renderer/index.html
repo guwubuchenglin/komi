@@ -167,13 +167,25 @@
               <label>白方 <select id="specWhite"></select></label>
             </div>
             <div class="field-row">
+              <label>速度
+                <select id="specSpeed">
+                  <option value="slow">慢慢看</option>
+                  <option value="normal" selected>标准</option>
+                  <option value="fast">快</option>
+                  <option value="turbo">极速（同测速）</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </label>
               <label>手数上限 <input id="specMaxMoves" type="number" value="240" min="20" max="600" /></label>
-              <label>落子间隔 <input id="specPace" type="number" value="350" min="0" max="3000" /></label>
+            </div>
+            <div class="field-row">
+              <label>每手访问 <input id="specVisits" type="number" value="60" min="1" max="2000" /></label>
+              <label>落子间隔 <input id="specPace" type="number" value="300" min="0" max="3000" /></label>
             </div>
             <div class="field-row">
               <label>测速局数 <input id="specGames" type="number" value="6" min="2" max="40" /></label>
-              <label>每手访问 <input id="specVisits" type="number" value="60" min="1" max="2000" /></label>
             </div>
+            <div class="hint" id="specSpeedHint">标准：每手 60 访问 + 间隔 300ms</div>
             <div class="hint" id="specStatus">选择双方难度后点「开始观战」</div>
           </div>
 

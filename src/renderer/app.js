@@ -143,6 +143,16 @@
     el("specBlack").value = "lv3";
     el("specWhite").value = "lv5";
 
+    // 观战速度：选预设会自动填好「每手访问 / 落子间隔」，手动改动则转为「自定义」
+    el("specSpeed").addEventListener("change", () => applySpectateSpeed(el("specSpeed").value));
+    for (const id of ["specVisits", "specPace"]) {
+      el(id).addEventListener("input", () => {
+        el("specSpeed").value = "custom";
+        renderSpectateSpeedHint();
+      });
+    }
+    applySpectateSpeed("normal", { silent: true });
+
     el("btnSpectateStart").addEventListener("click", onSpectateStart);
     el("btnSpectatePause").addEventListener("click", toggleSpectatePause);
     el("btnSpectateStop").addEventListener("click", stopSpectate);
@@ -1471,8 +1481,39 @@
     updateButtons();
   }
 
+  // 观战速度预设：每手访问数（影响棋力与耗时）+ 落子间隔（只影响观感，不影响棋力）
+  const SPECTATE_SPEEDS = {
+    slow: { visits: 200, pace: 700, label: "慢慢看" },
+    normal: { visits: 60, pace: 300, label: "标准" },
+    fast: { visits: 40, pace: 120, label: "快" },
+    turbo: { visits: 40, pace: 0, label: "极速（同测速）" },
+  };
+
+  function renderSpectateSpeedHint() {
+    const hint = el("specSpeedHint");
+    if (!hint) return;
+    const visits = Number(el("specVisits").value) || 60;
+    const pace = Number(el("specPace").value) || 0;
+    const label = SPECTATE_SPEEDS[el("specSpeed").value]?.label ?? "自定义";
+    // 粗估：本机双引擎 9 路约 600 访问/秒，19 路更慢；只做数量级参考
+    const est = Math.round((visits / 600) * 1000) + pace;
+    hint.textContent = `${label}：每手 ${visits} 访问 + 间隔 ${pace}ms ≈ ${(est / 1000).toFixed(2)} 秒/手（估算）`;
+  }
+
+  function applySpectateSpeed(key, { silent = false } = {}) {
+    const preset = SPECTATE_SPEEDS[key];
+    if (!preset) return;
+    el("specVisits").value = String(preset.visits);
+    el("specPace").value = String(preset.pace);
+    const sel = el("specSpeed");
+    if (sel.value !== key) sel.value = key;
+    renderSpectateSpeedHint();
+    if (!silent) log(`观战速度：${preset.label}（每手 ${preset.visits} 访问 · 间隔 ${preset.pace}ms）`);
+  }
+
   async function onSpectateStart() {
     resetSpectateBoard();
+    const visits = Number(el("specVisits").value) || 60;
     const opts = {
       size: S.size,
       komi: S.komi,
@@ -1481,11 +1522,15 @@
       levelWhite: el("specWhite").value,
       maxMoves: Number(el("specMaxMoves").value) || 240,
       paceMs: Number(el("specPace").value) || 0,
+      visitsBlack: visits,
+      visitsWhite: visits,
     };
     S.spectate.running = true;
     S.spectate.paused = false;
-    el("specStatus").textContent = `对局中：黑 ${levelLabel(opts.levelBlack)} vs 白 ${levelLabel(opts.levelWhite)}`;
-    log(`开始观战：黑 ${levelLabel(opts.levelBlack)} / 白 ${levelLabel(opts.levelWhite)}`);
+    el("specStatus").textContent =
+      `对局中：黑 ${levelLabel(opts.levelBlack)} vs 白 ${levelLabel(opts.levelWhite)}　` +
+      `每手 ${visits} 访问 · 间隔 ${opts.paceMs}ms`;
+    log(`开始观战：黑 ${levelLabel(opts.levelBlack)} / 白 ${levelLabel(opts.levelWhite)}（每手 ${visits} 访问，间隔 ${opts.paceMs}ms）`);
     setThinking(true, "AI 对局中…");
     updateButtons();
     const res = await api.spectateStart(opts);

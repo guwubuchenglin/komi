@@ -330,14 +330,27 @@ async function runUiFeatureTest(target) {
     const hc = await state();
     console.log("  让子局状态:", JSON.stringify(hc));
 
-    step("AI 观战：黑 lv3 vs 白 lv7");
+    step("AI 观战：黑 lv3 vs 白 lv7（观战速度预设）");
     await js(`(function(){
       document.querySelector('.mode-btn[data-mode="spectate"]').click();
       document.getElementById('specBlack').value='lv3';
       document.getElementById('specWhite').value='lv7';
-      document.getElementById('specPace').value='120';
       document.getElementById('specMaxMoves').value='80';
+      const s = document.getElementById('specSpeed');
+      s.value = 'fast';
+      s.dispatchEvent(new Event('change'));
     })()`);
+    await wait(700);
+    const speedUi = await js(`(function(){
+      const g = (id) => document.getElementById(id).value;
+      return {
+        speed: g('specSpeed'),
+        visits: g('specVisits'),
+        pace: g('specPace'),
+        hint: document.getElementById('specSpeedHint').textContent,
+      };
+    })()`);
+    console.log("  速度预设:", JSON.stringify(speedUi));
     await wait(1500);
     await js(`document.getElementById('btnSpectateStart').click()`);
     await wait(18000);
