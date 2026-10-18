@@ -100,7 +100,7 @@
     el("btnPass").addEventListener("click", onPass);
     el("btnResign").addEventListener("click", onResign);
     el("btnScore").addEventListener("click", onScoreNow);
-    el("btnSaveSgf").addEventListener("click", onSaveSgf);
+    el("btnSaveSgf").addEventListener("click", () => onSaveSgf());
     el("chkCandidates").addEventListener("change", (e) => {
       S.showCandidates = e.target.checked;
       draw();
@@ -1136,8 +1136,10 @@
       log("还没有棋谱可保存");
       return;
     }
+    // 只接受字符串路径；顺手挡住把 click 事件对象当路径传进来的情况
+    const target = typeof forcedPath === "string" && forcedPath ? forcedPath : undefined;
     try {
-      const res = await api.saveSgf(buildSgf(), `go-${S.size}x${S.size}-${S.mode}.sgf`, forcedPath);
+      const res = await api.saveSgf(buildSgf(), `go-${S.size}x${S.size}-${S.mode}.sgf`, target);
       if (res.saved) log(`棋谱已保存：${res.path}`);
     } catch (err) {
       log("保存棋谱失败: " + err.message);

@@ -390,23 +390,52 @@ async function runUiFeatureTest(target) {
     console.log("  停止耗时:", stoppedAt == null ? "未停止（异常）" : stoppedAt + "ms", " 状态栏:", stopText);
     await wait(1200);
 
-    step("保存观战棋谱");
+    step("保存观战棋谱（点真实按钮走 IPC，不走测试钩子）");
     await fs.mkdir(TEST_TMP, { recursive: true });
-    const sgfOut = path.join(TEST_TMP, 'spectate.sgf');
+    const sgfOut = path.join(TEST_TMP, 'spectate-ui.sgf');
+    // 让主进程跳过原生保存弹窗，直接写到这个路径
+    process.env.GO_TEST_SAVE_SGF = sgfOut;
     try {
       await fs.rm(sgfOut, { force: true });
     } catch {
       /* ignore */
     }
-    await js('window.__saveSgf(' + JSON.stringify(sgfOut) + ')');
-    await wait(900);
+    const saveBtnState = await js(`(function(){
+      const b = document.getElementById('btnSaveSgf');
+      return { disabled: b.disabled, label: b.textContent.trim() };
+    })()`);
+    console.log("  按钮状态:", JSON.stringify(saveBtnState));
+    await js(`document.getElementById('btnSaveSgf').click()`);
+    await wait(1500);
+    delete process.env.GO_TEST_SAVE_SGF;
     try {
       const txt = await fs.readFile(sgfOut, 'utf8');
       const moveCount = (txt.match(/;[BW]\[/g) || []).length;
       const names = (txt.match(/P[BW]\[[^\]]*\]/g) || []).join(' ');
-      console.log(`  SGF 已保存：${txt.length} 字节，${moveCount} 手，${names}`);
+      console.log(`  ✓ 按钮导出成功：${txt.length} 字节，${moveCount} 手，${names}`);
     } catch (err) {
-      console.log("  SGF 保存失败:", err.message);
+      console.log("  ✗ 按钮导出失败:", err.message);
+      const logTail = await js(`[...document.querySelectorAll('#logBox div')].slice(-4).map((d) => d.textContent)`);
+      console.log("  日志尾部:", JSON.stringify(logTail));
+      process.exitCode = 1;
+    }
+
+    step("保存棋谱：直接指定路径（测试钩子 window.__saveSgf）");
+    const sgfDirect = path.join(TEST_TMP, 'spectate.sgf');
+    try {
+      await fs.rm(sgfDirect, { force: true });
+    } catch {
+      /* ignore */
+    }
+    await js('window.__saveSgf(' + JSON.stringify(sgfDirect) + ')');
+    await wait(900);
+    try {
+      const txt = await fs.readFile(sgfDirect, 'utf8');
+      const moveCount = (txt.match(/;[BW]\[/g) || []).length;
+      console.log(`  ✓ 指定路径保存成功：${txt.length} 字节，${moveCount} 手`);
+    } catch (err) {
+      console.log("  ✗ 指定路径保存失败:", err.message);
+      process.exitCode = 1;
     }
 
     step("棋谱复盘：加载 test-game.sgf");
@@ -941,10 +970,19 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('game:score', async () => manager.finalScore());
 
-  ipcMain.handle('game:saveSgf', async (_e, { sgf, suggestedName, forcedPath }) => {
-    if (forcedPath) {
+  ipcMain.handle('game:saveSgf', async (_e, { sgf, suggestedName, forcedPath } = {}) => {
+    if (!sgf || typeof sgf !== 'string') throw new Error('棋谱内容为空');
+    // 只有字符串才算「指定路径」，防止界面把事件对象之类的东西当路径传进来
+    if (typeof forcedPath === 'string' && forcedPath) {
       await fs.writeFile(forcedPath, sgf, 'utf8');
       return { saved: true, path: forcedPath };
+    }
+    // 自动测试用：不走原生弹窗，直接写文件（GO_TEST_SAVE_SGF=<路径>）
+    if (process.env.GO_TEST_SAVE_SGF) {
+      const target = process.env.GO_TEST_SAVE_SGF;
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, sgf, 'utf8');
+      return { saved: true, path: target };
     }
     const res = await dialog.showSaveDialog(win, {
       title: '保存棋谱',
