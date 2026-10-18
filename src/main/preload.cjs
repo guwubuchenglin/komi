@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('go', {
   downloadConfig: () => ipcRenderer.invoke('download:get'),
   setDownloadSource: (mode) => ipcRenderer.invoke('download:set', mode),
 
+  // 偏好设置（性能模式）
+  settings: () => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
+
   // 首次安装向导
   setupCheck: () => ipcRenderer.invoke('setup:check'),
   setupInstall: (ids, opts) => ipcRenderer.invoke('setup:install', ids, opts),

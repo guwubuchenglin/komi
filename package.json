@@ -1,6 +1,6 @@
 {
   "name": "komi",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "productName": "Komi",
   "description": "Komi - offline Go game with local KataGo AI (adjustable strength, AI vs AI, SGF review)",
@@ -19,12 +19,14 @@
     "build:launcher": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-launcher.ps1",
     "exe": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-launcher.ps1",
     "test:sgf": "node scripts/test-sgf.mjs",
+    "test:perf": "node scripts/test-perf.mjs",
+    "perf:engine": "npm run build:renderer && electron . --perf-test",
     "gen:sgf": "node scripts/gen-test-sgf.mjs",
-    "test:all": "npm run test:rules && npm run test:sgf",
+    "test:all": "npm run test:rules && npm run test:sgf && npm run test:perf",
     "dist": "npm run build:renderer && node tools/patch-wix-template.mjs && electron-builder --config build/electron-builder.yml",
     "dist:msi": "npm run build:renderer && node tools/patch-wix-template.mjs && electron-builder --config build/electron-builder.yml --win msi",
     "dist:dir": "npm run build:renderer && electron-builder --config build/electron-builder.yml --win dir",
-    "dist:uninstall": "msiexec /x \"dist\\Komi-0.4.1.msi\" /qn",
+    "dist:uninstall": "msiexec /x \"dist\\Komi-0.4.2.msi\" /qn",
     "fetch:engine": "node tools/download-engine.mjs"
   },
   "devDependencies": {

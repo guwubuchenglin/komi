@@ -11,7 +11,16 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { GtpEngine, parseGenmoveAnalyze } from './gtp.js';
-import { levelById, engineProfileKey, generateCfg, runtimeParamsFor, BACKEND } from './difficulty.js';
+import {
+  levelById,
+  engineProfileKey,
+  generateCfg,
+  runtimeParamsFor,
+  tuningFor,
+  normalizePerfMode,
+  PERF,
+  BACKEND,
+} from './difficulty.js';
 import { idxOf, idxToGtp } from '../shared/board.js';
 import { execFile } from 'node:child_process';
 
@@ -57,11 +66,23 @@ function probeBackendLabel(exe) {
 }
 
 export class EngineManager extends EventEmitter {
-  constructor({ rootDir, dataDir, engineRoot, threads = 6 }) {
+  constructor({
+    rootDir,
+    dataDir,
+    engineRoot,
+    threads = 6,
+    perfMode = PERF.BALANCED,
+    perfEngines = 1,
+    trackHistory = true,
+  }) {
     super();
     this.rootDir = rootDir;
     this.dataDir = dataDir ?? rootDir;
     this.threads = threads;
+    this.perfMode = normalizePerfMode(perfMode);
+    this.perfEngines = Math.max(1, perfEngines);
+    this.trackHistory = trackHistory;
+    this.tune = tuningFor({ mode: this.perfMode, threads, engines: this.perfEngines });
     // engine 目录可能是随包内置的（离线版），也可能是首次运行下载到用户目录的（精简安装）
     this.engineDir = engineRoot ?? path.join(rootDir, 'engine');
     this.cfgDir = path.join(this.dataDir, 'config', 'generated');
@@ -83,6 +104,9 @@ export class EngineManager extends EventEmitter {
     this.level = levelById('lv4');
     this.size = 19;
     this.komi = 7.5;
+    this.handicap = 0;
+    // 引擎侧局面记录：引擎重启（换难度/切性能模式/崩溃）后据此恢复，避免棋盘失同步
+    this.history = [];
     this.log = [];
   }
 
@@ -109,9 +133,24 @@ export class EngineManager extends EventEmitter {
     await mkdir(this.cfgDir, { recursive: true });
     const backend = this.backends.find((b) => b.id === backendId);
     const backendParams = backend?.params ?? [];
-    const baseKey = `${engineProfileKey(level, this.fast)}@${backendId}`;
+    const baseKey = `${engineProfileKey(level, this.fast, this.perfMode)}@${backendId}`;
+    this.tune = tuningFor({
+      mode: this.perfMode,
+      threads: this.threads,
+      engines: this.perfEngines,
+      backendId,
+    });
     const content =
-      [...generateCfg(level, { threads: this.threads, fast: this.fast }), ...backendParams].join('\n') + '\n';
+      [
+        ...generateCfg(level, {
+          threads: this.threads,
+          fast: this.fast,
+          perfMode: this.perfMode,
+          perfEngines: this.perfEngines,
+          backendId,
+        }),
+        ...backendParams,
+      ].join('\n') + '\n';
     // 用内容哈希命名：配置一改就自动失效，避免读到旧缓存
     const hash = createHash('sha1').update(content).digest('hex').slice(0, 8);
     const file = path.join(this.cfgDir, `${baseKey.replace(/[^a-z0-9]+/gi, '_')}-${hash}.cfg`);
@@ -171,7 +210,7 @@ export class EngineManager extends EventEmitter {
   }
 
   _cfgKey(level, backendId) {
-    return `${engineProfileKey(level, this.fast)}@${backendId}`;
+    return `${engineProfileKey(level, this.fast, this.perfMode)}@${backendId}`;
   }
 
   /** 确保引擎处于该档位所需状态（按后端优先级逐个尝试） */
@@ -228,12 +267,17 @@ export class EngineManager extends EventEmitter {
         this._note(
           `引擎启动成功 ${backend.label}${this.backendDetail ? `（${this.backendDetail}）` : ''}  ${hs.version}`,
         );
+        this._note(
+          `搜索参数：${this.tune.numSearchThreads} 线程 · batch ${this.tune.nnMaxBatchSize} · NN server ${
+            this.tune.numNNServerThreadsPerModel
+          }（${this.perfMode === PERF.PERFORMANCE ? '性能模式' : '省电模式'}）`,
+        );
         this._cachedBackend = backend.id;
         if (!process.env.GO_BACKEND && !process.argv.some((a) => a.startsWith('--backend='))) {
           await this.saveCachedBackend(backend.id);
         }
         this.emit('ready', { ...hs, backend: backend.id });
-        await this._applyBoardSettings();
+        await this._restoreBoard();
         await this.applyRuntimeParams(level);
         return engine;
       } catch (err) {
@@ -255,6 +299,31 @@ export class EngineManager extends EventEmitter {
     await e.command(`boardsize ${this.size}`, 30000);
     await e.command('kata-set-rules rules=chinese', 30000).catch(() => {});
     await e.command(`komi ${this.komi}`, 30000);
+  }
+
+  /**
+   * 引擎（重新）启动后恢复局面。
+   * 新进程是空盘，如果这时界面上已经有棋子，不重放就会「引擎不知道自己在哪」，
+   * 表现为回错手、非法着法或胜率突然跳到 50%。
+   */
+  async _restoreBoard() {
+    const e = this.engine;
+    if (!e) return;
+    await this._applyBoardSettings();
+    if (!this.trackHistory || !this.history.length) return;
+
+    await e.command('clear_board', 30000);
+    if (this.handicap > 0) {
+      await e.command(`fixed_handicap ${this.handicap}`, 30000).catch((err) => {
+        this._note(`恢复让子失败：${err.message}`);
+      });
+    }
+    for (const m of this.history) {
+      await e.command(`play ${m.color} ${m.coord}`, 30000).catch((err) => {
+        this._note(`恢复第 ${m.n} 手（${m.color} ${m.coord}）失败：${err.message}`);
+      });
+    }
+    this._note(`引擎已恢复局面：${this.history.length} 手${this.handicap > 0 ? `（让 ${this.handicap} 子）` : ''}`);
   }
 
   /** 热切换搜索参数 */
@@ -281,11 +350,35 @@ export class EngineManager extends EventEmitter {
     this.fast = Boolean(fast);
   }
 
+  /**
+   * 切换性能模式（省电 / 高吞吐）。
+   * 线程数与批大小写在 cfg 里，属于「配置级」参数，必须重启引擎才生效；
+   * 局面由 history 在重启后自动恢复。
+   */
+  async setPerfMode(mode) {
+    const next = normalizePerfMode(mode);
+    if (next === this.perfMode) {
+      return { changed: false, restarted: false, tune: this.tune };
+    }
+    this.perfMode = next;
+    this.tune = tuningFor({ mode: next, threads: this.threads, engines: this.perfEngines });
+    const wasRunning = Boolean(this.engine?.running);
+    if (this.engine) {
+      await this.engine.stop().catch(() => {});
+      this.engine = null;
+      this.activeKey = null;
+    }
+    this._note(`性能模式 → ${next === PERF.PERFORMANCE ? '高吞吐' : '省电'}（下次落子/分析时重启引擎生效）`);
+    return { changed: true, restarted: wasRunning, tune: this.tune };
+  }
+
   /** 选择难度：必要时重启引擎，否则只改搜索参数 */
   async setLevel(levelId) {
     const level = levelById(levelId);
-    const needRestart = engineProfileKey(level) !== this.activeKey;
     this.level = level;
+    // 只有配置指纹（含后端）真的变了才需要重启；同一后端下换档位走热切换
+    const needRestart =
+      !this.engine?.running || (this.backendId ? this.activeKey !== this._cfgKey(level, this.backendId) : false);
     await this.ensureEngine(level);
     if (!needRestart) await this.applyRuntimeParams(level);
     this._note(`难度切换为 ${level.label}（${level.rank}）${needRestart ? '（已重启引擎）' : '（热切换）'}`);
@@ -296,6 +389,8 @@ export class EngineManager extends EventEmitter {
     this.size = size;
     this.komi = komi;
     this.level = levelById(levelId);
+    this.handicap = handicap;
+    this.history = [];
     const e = await this.ensureEngine(this.level);
     // 顺序很重要：boardsize 会重建棋盘，必须放在 clear_board 之前，
     // 之后 clear_board 再兜一次底，最后才是 fixed_handicap（它要求空盘）
@@ -318,12 +413,18 @@ export class EngineManager extends EventEmitter {
   async play(color, coord) {
     const e = await this.ensureEngine();
     await e.command(`play ${color} ${coord}`, 60000);
+    if (this.trackHistory) this.history.push({ n: this.history.length + 1, color, coord });
   }
 
   async undo(times = 1) {
     const e = await this.ensureEngine();
     for (let i = 0; i < times; i++) {
-      await e.command('undo', 30000).catch(() => {});
+      try {
+        await e.command('undo', 30000);
+        if (this.trackHistory) this.history.pop();
+      } catch {
+        /* 没有可悔的棋时忽略 */
+      }
     }
   }
 
@@ -335,6 +436,9 @@ export class EngineManager extends EventEmitter {
     const raw = await e.command(`kata-genmove_analyze ${color} interval 100 ownership true`, budget);
     const { move, infos, ownership } = parseGenmoveAnalyze(raw);
     const elapsedMs = Date.now() - t0;
+    if (this.trackHistory && move && !/^resign$/i.test(String(move).trim())) {
+      this.history.push({ n: this.history.length + 1, color, coord: String(move).trim() });
+    }
     this._note(`${color} genmove -> ${move} (${elapsedMs}ms, ${infos.length} 候选)`);
     return {
       move,
@@ -468,6 +572,8 @@ export class EngineManager extends EventEmitter {
       backend: this.backendId,
       backendLabel: this.backendLabel,
       backendDetail: this.backendDetail ?? null,
+      perfMode: this.perfMode,
+      tune: this.tune,
       log: this.log.slice(-20),
     };
   }

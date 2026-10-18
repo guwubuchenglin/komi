@@ -293,8 +293,32 @@
     await refreshPathsInfo();
     el("btnChooseDir").addEventListener("click", onChooseDir);
 
+    // 性能模式（高吞吐 / 省电）
+    let refreshPerfInfo = async () => {};
+    try {
+      const st = await api.settings();
+      const perfSel = el("perfSelect");
+      let previous = st.perfMode === "balanced" ? "balanced" : "performance";
+      perfSel.value = previous;
+      renderPerfInfo(st);
+      perfSel.addEventListener("change", async () => {
+        previous = await onPerfChange(perfSel, previous);
+      });
+      // 引擎起来之后后端才知道（CUDA 的 batch 更大），届时刷新一次显示
+      refreshPerfInfo = async () => {
+        try {
+          renderPerfInfo(await api.settings());
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      /* 旧版主进程没有 settings 接口时忽略 */
+    }
+
     const started = await ensureComponentsThenStart();
     if (!started) return;
+    await refreshPerfInfo();
   }
 
   function setupCanvas() {
@@ -883,20 +907,23 @@
       }
     }
 
-    // 棋子
+    // 棋子（对局还没建起来时 S.game 为 null，启动瞬间的重绘不能报错）
+    const board = S.game?.board;
     const lastMove = S.game?.history?.[S.game.history.length - 1];
-    for (let idx = 0; idx < S.game.board.length; idx++) {
-      const v = S.game.board[idx];
-      if (v === R.EMPTY) continue;
-      const x = S.origin + R.xOf(idx, S.size) * S.cell;
-      const y = S.origin + R.yOf(idx, S.size) * S.cell;
-      drawStone(ctx, x, y, S.cell * 0.46, v);
-      if (S.showNumbers) {
-        const num = moveNumberAt(idx);
-        if (num) {
-          ctx.fillStyle = v === R.BLACK ? "rgba(255,255,255,0.85)" : "rgba(30,30,30,0.85)";
-          ctx.font = `${Math.max(8, S.cell * 0.34)}px "Segoe UI", sans-serif`;
-          ctx.fillText(num, x, y);
+    if (board) {
+      for (let idx = 0; idx < board.length; idx++) {
+        const v = board[idx];
+        if (v === R.EMPTY) continue;
+        const x = S.origin + R.xOf(idx, S.size) * S.cell;
+        const y = S.origin + R.yOf(idx, S.size) * S.cell;
+        drawStone(ctx, x, y, S.cell * 0.46, v);
+        if (S.showNumbers) {
+          const num = moveNumberAt(idx);
+          if (num) {
+            ctx.fillStyle = v === R.BLACK ? "rgba(255,255,255,0.85)" : "rgba(30,30,30,0.85)";
+            ctx.font = `${Math.max(8, S.cell * 0.34)}px "Segoe UI", sans-serif`;
+            ctx.fillText(num, x, y);
+          }
         }
       }
     }
@@ -1149,6 +1176,47 @@
       setMeter("gpuBar", "gpuText", null, "无独显");
       setMeter("vramBar", "vramText", null, "—");
     }
+  }
+
+  // ================================================================== 性能模式
+  function renderPerfInfo(info) {
+    const box = el("perfText");
+    if (!box || !info?.tune) return;
+    const t = info.tune;
+    const label = info.perfMode === "balanced" ? "省电" : "高吞吐";
+    box.textContent = `${t.numSearchThreads} 线程 · batch ${t.nnMaxBatchSize}`;
+    const sp = info.spectateTune;
+    box.title =
+      `${label}模式　单引擎 ${t.numSearchThreads} 线程 / batch ${t.nnMaxBatchSize}` +
+      (sp ? `　观战双引擎各 ${sp.numSearchThreads} 线程` : "") +
+      (info.cores ? `　CPU ${info.cores} 核` : "");
+  }
+
+  async function onPerfChange(select, previous) {
+    const target = select.value;
+    select.disabled = true;
+    setThinking(true, "切换性能模式…");
+    try {
+      const res = await api.setSettings({ perfMode: target });
+      if (!res?.ok) {
+        select.value = previous;
+        log("性能模式未切换：" + (res?.reason ?? "未知原因"));
+        return;
+      }
+      renderPerfInfo(res);
+      log(
+        `性能模式 → ${res.perfLabel}（单引擎 ${res.tune.numSearchThreads} 线程 · batch ${res.tune.nnMaxBatchSize}` +
+          `${res.spectateTune ? `；观战双引擎各 ${res.spectateTune.numSearchThreads} 线程` : ""}）` +
+          (res.restarted ? "，下一次思考时自动重启引擎并恢复局面" : ""),
+      );
+    } catch (err) {
+      select.value = previous;
+      log("切换性能模式失败：" + (err?.message ?? err));
+    } finally {
+      select.disabled = false;
+      setThinking(false);
+    }
+    return select.value;
   }
 
   // ================================================================== 组件目录

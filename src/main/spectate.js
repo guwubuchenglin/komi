@@ -11,12 +11,14 @@ import { createState, playMove, playPass, placeStones, gtpToIdx, xOf, yOf, BLACK
 const RESIGN = 'resign';
 
 export class SpectateRunner extends EventEmitter {
-  constructor({ rootDir, dataDir, engineRoot, threads = 6 } = {}) {
+  constructor({ rootDir, dataDir, engineRoot, threads = 6, perfMode = 'balanced' } = {}) {
     super();
     this.rootDir = rootDir;
     this.dataDir = dataDir ?? rootDir;
     this.engineRoot = engineRoot ?? null;
     this.threads = threads;
+    // 观战同时跑两个引擎，性能模式要按 2 个引擎平分 CPU 核数
+    this.perfMode = perfMode;
     this.engines = null;
     this.aborted = false;
     this.paused = false;
@@ -30,12 +32,25 @@ export class SpectateRunner extends EventEmitter {
         dataDir: this.dataDir,
         engineRoot: this.engineRoot ?? undefined,
         threads: this.threads,
+        perfMode: this.perfMode,
+        perfEngines: 2,
+        // 观战由自己维护双方棋盘，不需要引擎管理器记录历史
+        trackHistory: false,
       });
       mgr.on('log', (line) => this.emit('log', `[${name}] ${line}`));
       return mgr;
     };
     this.engines = { A: make('A'), B: make('B') };
     return this.engines;
+  }
+
+  /** 切换性能模式（本轮对局结束后生效：两个引擎都会重启） */
+  async setPerfMode(mode) {
+    this.perfMode = mode;
+    if (!this.engines) return { changed: true, restarted: false };
+    const out = [];
+    for (const mgr of Object.values(this.engines)) out.push(await mgr.setPerfMode(mode));
+    return { changed: out.some((o) => o.changed), restarted: out.some((o) => o.restarted), tune: out[0]?.tune };
   }
 
   async _setVisits(mgr, visits) {

@@ -84,7 +84,7 @@ Komi 内置 KataGo 引擎与神经网络权重，所有思考都在你本机的�
 
 ### 方式一：安装包（推荐给最终用户）
 
-双击 `dist\\Komi-0.4.1.msi`（**96 MB**），安装向导全中文，按 WiX 官方界面规范走四步：
+双击 `dist\\Komi-0.4.2.msi`（**96 MB**），安装向导全中文，按 WiX 官方界面规范走四步：
 
 ```
 欢迎使用 Komi 安装向导
@@ -286,7 +286,7 @@ npm start                # 启动
 `%LOCALAPPDATA%\Programs\Komi`。需要换位置时用静默安装参数：
 
 ```bat
-msiexec /i "Komi-0.4.1.msi" /qn APPLICATIONFOLDER="D:\Games\Komi"
+msiexec /i "Komi-0.4.2.msi" /qn APPLICATIONFOLDER="D:\Games\Komi"
 ```
 
 **下载的组件默认跟着安装目录走**（装在 `<安装目录>\engine\`），装到 D 盘时 250 MB 的权重与后端也落在 D 盘。
@@ -361,6 +361,34 @@ cudnn*.dll            # cuDNN 9 运行库
 ```
 
 （还需要系统里有 CUDA 12 运行库，即 `cudart64_12.dll` 与 `cublas*`，通常随 CUDA Toolkit 安装。）
+
+### 性能模式（高吞吐 / 省电）
+
+右上角「性能」下拉框，随时可切，选择会记在 `%APPDATA%\Komi\config\settings.json`：
+
+| 档位 | 搜索线程 | NN 批次 | NN server 线程 | 适合 |
+|---|---|---|---|---|
+| **高吞吐**（默认） | ⌊(核数−1) ÷ 引擎数⌋，上限 16 | CUDA 24 / 其它 16 | CUDA 2 | 有独显，想要更强的实时分析 |
+| 省电 | 6（观战 4） | 8 | 1 | 笔记本、核显、想让风扇安静 |
+
+实测（RTX 2080 Ti + b18c384nbt，19 路，2000 访问）：省电 6 线程 ≈ **520～610 visits/s**，
+高吞吐 15 线程 ≈ **1235～1250 visits/s**，约 2 倍。观战是双引擎同跑，线程按核数平分（16 核 → 各 7）。
+
+**切换会重启引擎**——中断中的对局不会丢：引擎管理器记录了每一手，重启后自动重放恢复
+（`--perf-test` 会验证「往已有棋子处落子被拒绝」）。观战/测速进行中不允许切换，避免两台引擎状态不一致。
+
+#### 为什么 CUDA 占用率看起来不高？
+
+这不是优化问题，是 KataGo 的固有形态：
+
+- GPU 只负责**算神经网络**（policy / value / ownership），搜索树（PUCT、选点、劫争合法性）全在 CPU 上串行推进；
+- 于是 GPU 的节奏是「等 CPU 凑一批 → 算 3~5 毫秒 → 再等」，`nvidia-smi` 那 1 秒窗口的百分比自然偏低；
+- 真正决定效率的是**批大小**。官方 benchmark 实测：平均 batch 2.5 时 326 nnEvals/s，batch 39 时 1537 nnEvals/s
+  ——**同样的卡，靠攒批快 4.7 倍**。高吞吐模式就是加线程把批喂满；
+- 低档位（入门 40 访问）本身就是 30~50 毫秒的短促突发，任何一秒粒度的占用率曲线都抓不到。
+
+所以判断优化好坏请看 **visits/s**：状态栏「搜索线程」显示当前实际参数，引擎日志里也有
+`搜索参数：15 线程 · batch 24 · NN server 2（性能模式）`。
 
 ### 卸载
 
@@ -450,8 +478,10 @@ npm run build:renderer        # 重新生成 renderer/rules.global.js
 npm run fetch:engine          # 下载引擎与权重到 engine/（--cuda 加 CUDA 包，--mirror china 走镜像）
 npm run test:rules            # 规则引擎单测（11 项）
 npm run test:sgf              # SGF 解析/生成单测（8 项）
+npm run test:perf             # 性能模式参数单测（15 项：线程/批次/cfg 内容/配置指纹）
 npm run smoke                 # 引擎冒烟测试（握手/参数/分析流/拟人模型）
 npm run selftest              # 无界面全链路自检（新局→落子→难度切换→数子）
+npm run perf:engine           # 无界面：高吞吐 vs 省电吞吐对比 + 引擎重启后局面恢复校验
 npm run gen:sgf               # 用两个引擎下一局并导出 SGF 到 .tmp/
 npm run shot                  # 启动、自动走几手并截图到 .tmp/shot.png（--shot-plain 截空盘）
 ```
@@ -462,6 +492,7 @@ npm run shot                  # 启动、自动走几手并截图到 .tmp/shot.p
 electron . --selftest                     # 核心链路
 electron . --handicap                     # 让子棋（2 子 / 4 子）
 electron . --spectate                     # 观战一局 + 4 局 ELO 测速
+electron . --perf-test                    # 性能模式吞吐对比 + 局面恢复校验
 electron . --review .tmp/test-game.sgf    # 复盘：逐手评估 + 恶手
 electron . --ui                           # 三种模式的 UI 级验证
 ```

@@ -1,3 +1,5 @@
+import os from 'node:os';
+
 /**
  * 难度系统
  *
@@ -12,6 +14,59 @@
  */
 
 export const BACKEND = { HUMAN: 'human', NORMAL: 'normal' };
+
+/**
+ * 性能档位
+ * - balanced：默认。线程数少、批次小，省电、发热低，笔记本上也稳。
+ * - performance：高吞吐。按 CPU 核数放大搜索线程、放大 NN 批次、必要时开 2 个 NN server 线程，
+ *   目标是把「每秒访问数（visits/s）」拉起来（实测 2080 Ti + b18c384nbt：6 线程≈380、16 线程≈1140）。
+ * 注意：nvidia-smi 的占用率不是好指标——MCTS 是 CPU 侧串行、GPU 只算短批次，
+ * 低占用是常态，真正要看的是一次搜索跑完了多少访问。
+ */
+export const PERF = { BALANCED: 'balanced', PERFORMANCE: 'performance' };
+
+export function normalizePerfMode(mode) {
+  return mode === PERF.PERFORMANCE ? PERF.PERFORMANCE : PERF.BALANCED;
+}
+
+/**
+ * 计算搜索线程 / 批次大小 / NN server 线程数。
+ * @param {object} o
+ * @param {'balanced'|'performance'} [o.mode]
+ * @param {number} [o.threads]     基础线程数（balanced 直接用它）
+ * @param {number} [o.engines]     同时运行的引擎数（观战是两个，线程要平分）
+ * @param {string|null} [o.backendId] 后端 id，CUDA 才开多 NN server 线程
+ * @param {number} [o.cores]       CPU 逻辑核数
+ */
+export function tuningFor({
+  mode = PERF.BALANCED,
+  threads = 6,
+  engines = 1,
+  backendId = null,
+  cores = os.cpus().length,
+} = {}) {
+  const normalized = normalizePerfMode(mode);
+  if (normalized === PERF.BALANCED) {
+    return {
+      mode: normalized,
+      numSearchThreads: Math.max(1, Math.round(threads)),
+      nnMaxBatchSize: 8,
+      numNNServerThreadsPerModel: 1,
+    };
+  }
+  // 留一个核给系统与界面线程；多个引擎平分；上限 16（再多收益很小，实测 24~64 线程只比 16 快 30%）
+  const usable = Math.max(2, (cores || 2) - 1);
+  const per = Math.max(2, Math.min(16, Math.floor(usable / Math.max(1, engines))));
+  // CUDA 攒大批次收益最好；OpenCL / DirectML 要为新的批次大小编译内核，批次保守一点，避免首次运行过慢
+  const batch = backendId === 'cuda' ? (per >= 12 ? 24 : 16) : 16;
+  return {
+    mode: normalized,
+    numSearchThreads: per,
+    nnMaxBatchSize: batch,
+    // 官方 benchmark 结论：CUDA 上 2 个 NN server 线程更快（+4.7%），代价是多占一点显存
+    numNNServerThreadsPerModel: backendId === 'cuda' ? 2 : 1,
+  };
+}
 
 /**
  * @typedef {object} Level
@@ -143,16 +198,28 @@ export function levelById(id) {
  * 该档位需要启动/重启引擎时使用的“配置指纹”。
  * 指纹变化 = 必须重启引擎；否则只用 kata-set-param 热切换。
  */
-export function engineProfileKey(level, fast = false) {
+export function engineProfileKey(level, fast = false, perfMode = PERF.BALANCED) {
   const suffix = fast ? ":fast" : "";
+  const perfSuffix = normalizePerfMode(perfMode) === PERF.PERFORMANCE ? ":perf" : "";
   if (level.backend === BACKEND.HUMAN) {
-    return `human:${level.humanProfile}:${level.piklLambda ?? "pure"}:${level.rootExplore ? "explore" : "plain"}${suffix}`;
+    return `human:${level.humanProfile}:${level.piklLambda ?? "pure"}:${level.rootExplore ? "explore" : "plain"}${perfSuffix}${suffix}`;
   }
-  return `normal${suffix}`;
+  return `normal${perfSuffix}${suffix}`;
 }
 
 /** 生成该档位的 GTP 配置内容（config/generated/<key>.cfg） */
-export function generateCfg(level, { threads = 6, boardSize = 19, fast = false } = {}) {
+export function generateCfg(
+  level,
+  {
+    threads = 6,
+    boardSize = 19,
+    fast = false,
+    perfMode = PERF.BALANCED,
+    perfEngines = 1,
+    backendId = null,
+  } = {},
+) {
+  const tune = tuningFor({ mode: perfMode, threads, engines: perfEngines, backendId });
   // 用对象累积，同一键后写覆盖先写，避免 KataGo 因重复键拒绝启动
   const cfg = {
     logDir: "gtp_logs",
@@ -170,6 +237,9 @@ export function generateCfg(level, { threads = 6, boardSize = 19, fast = false }
     reportAnalysisWinratesAs: "SIDETOMOVE",
     analysisPVLen: 12,
     nnCacheSizePowerOfTwo: 20,
+    // 神经网络批处理与 NN server 线程（拟人档也保留同样的批处理能力）
+    nnMaxBatchSize: tune.nnMaxBatchSize,
+    numNNServerThreadsPerModel: tune.numNNServerThreadsPerModel,
   };
 
   if (level.backend === BACKEND.HUMAN) {
@@ -209,7 +279,7 @@ export function generateCfg(level, { threads = 6, boardSize = 19, fast = false }
       subtreeValueBiasFactor: "0.0",
       useNoisePruning: "false",
       maxVisits: level.maxVisits,
-      numSearchThreads: pure ? 1 : threads,
+      numSearchThreads: pure ? 1 : tune.numSearchThreads,
       lagBuffer: "1.0",
       delayMoveScale: fast ? "0" : "0.6",
       delayMoveMax: fast ? "0" : "1.8",
@@ -217,7 +287,7 @@ export function generateCfg(level, { threads = 6, boardSize = 19, fast = false }
   } else {
     Object.assign(cfg, {
       maxVisits: level.maxVisits,
-      numSearchThreads: threads,
+      numSearchThreads: tune.numSearchThreads,
       ponderingEnabled: "false",
       maxTimePondering: "30.0",
       lagBuffer: "1.0",
@@ -227,7 +297,6 @@ export function generateCfg(level, { threads = 6, boardSize = 19, fast = false }
       searchFactorAfterTwoPass: "0.25",
       playoutDoublingAdvantage: level.pdA ?? 0.0,
       rootPolicyTemperature: "1.1",
-      nnMaxBatchSize: 8,
     });
   }
 

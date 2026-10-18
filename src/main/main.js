@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs/promises';
 import { existsSync, writeFileSync, readFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +12,7 @@ import { SystemMetrics } from './metrics.js';
 import { COMPONENTS, missingComponents, installSelected, totalBytes, componentById, cleanDownloadCache } from './components.js';
 import { detectHardware, evaluateComponent, summarize } from './hardware.js';
 import { probeSources } from './mirrors.js';
-import { LEVELS, describeLevel } from './difficulty.js';
+import { LEVELS, describeLevel, tuningFor, normalizePerfMode, PERF } from './difficulty.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..', '..');
@@ -27,6 +28,8 @@ let spectate = null;
 let spectateBusy = false;
 let uiTestMode = false;
 let metrics = null;
+// 用户偏好（config/settings.json）；默认开高吞吐，弱机可在界面里切回省电
+let settings = { perfMode: PERF.PERFORMANCE };
 
 // 可写数据目录（安装版里程序目录是只读的）
 const DATA_DIR = app.getPath('userData');
@@ -136,6 +139,8 @@ const PROBE_JS = `(function(){
     candidates: document.getElementById('candidateList').children.length,
     candidateSample: [...document.querySelectorAll('#candidateList li')].slice(0,3).map(li => li.textContent.replace(/\\s+/g,' ').trim()),
     logTail: [...document.querySelectorAll('#logBox div')].slice(-8).map(el => el.textContent),
+    perfMode: document.getElementById('perfSelect') ? document.getElementById('perfSelect').value : null,
+    perfText: document.getElementById('perfText') ? document.getElementById('perfText').textContent : null,
     thinkingVisible: !document.getElementById('thinking').classList.contains('hidden'),
     modalVisible: !document.getElementById('resultModal').classList.contains('hidden'),
   };
@@ -435,6 +440,46 @@ async function runUiFeatureTest(target) {
     console.log("  导航 index:", nav.reviewIndex, "→ 跳恶手后:", nav2.reviewIndex);
     console.log("  走势图当前手标记:", chart.goldPixels > 0 ? "有" : "无", "(" + chart.width + "x" + chart.height + ")");
 
+    step("性能模式：切换到省电再切回高吞吐（引擎重启 + 局面恢复）");
+    await js(`document.querySelector('.mode-btn[data-mode="play"]').click()`);
+    await wait(9000);
+    const beforePerf = await js(`(function(){
+      return {
+        mode: document.getElementById('perfSelect').value,
+        text: document.getElementById('perfText').textContent,
+        moveNumber: window.__state().moveNumber,
+        stones: window.__state().stones,
+      };
+    })()`);
+    console.log("  当前:", JSON.stringify(beforePerf));
+    await js(`(function(){
+      const s = document.getElementById('perfSelect');
+      s.value = s.value === 'performance' ? 'balanced' : 'performance';
+      s.dispatchEvent(new Event('change'));
+    })()`);
+    await wait(1500);
+    const midPerf = await js(`(function(){
+      return {
+        mode: document.getElementById('perfSelect').value,
+        text: document.getElementById('perfText').textContent,
+        status: (window.__state().moveNumber),
+      };
+    })()`);
+    console.log("  切换后:", JSON.stringify(midPerf));
+    // 让引擎真正重启：下一手 AI 落子会触发 ensureEngine
+    await js(`document.getElementById('btnPass').click()`);
+    await wait(14000);
+    const afterPerf = await js(`(function(){
+      return {
+        mode: document.getElementById('perfSelect').value,
+        stones: window.__state().stones,
+        moveNumber: window.__state().moveNumber,
+        logTail: [...document.querySelectorAll('#logBox div')].slice(-6).map((d) => d.textContent),
+      };
+    })()`);
+    console.log("  落子后:", JSON.stringify(afterPerf, null, 2));
+    console.log("  局面恢复:", afterPerf.logTail.some((l) => l.includes("已恢复局面")) ? "✓ 有恢复日志" : "（无历史，属正常）");
+
     step("全部通过");
   } catch (err) {
     console.error("UI 功能测试失败:", err && err.message ? err.message : err);
@@ -558,6 +603,55 @@ async function runHandicapTest() {
   const w4 = await mgr.genmove('W');
   console.log(`  白棋应手: ${w4.move}  ${w4.elapsedMs}ms`);
 
+  await mgr.shutdown();
+  app.quit();
+}
+
+/**
+ * 无界面：性能模式测试
+ * 1) 高吞吐 vs 省电 的每秒访问数对比
+ * 2) 切换性能模式会重启引擎 —— 验证局面被自动恢复（往已有棋子处落子必须被拒绝）
+ */
+async function runPerfTest() {
+  const mgr = new EngineManager({
+    rootDir: APP_ROOT,
+    threads: 6,
+    perfMode: 'performance',
+  });
+  mgr.on('log', (l) => console.log('[engine]', l));
+  const step = (s) => console.log(`\n### ${s}`);
+  const rate = (ms, visits) => `${Math.round(visits / (ms / 1000))} visits/s`;
+
+  step(`高吞吐模式：${mgr.tune.numSearchThreads} 线程 / batch ${mgr.tune.nnMaxBatchSize}`);
+  await mgr.newGame({ size: 9, komi: 7, levelId: 'lv9' });
+  const a = await mgr.genmove('B');
+  console.log(`  黑 ${a.move}  ${a.elapsedMs}ms  ${rate(a.elapsedMs, 2000)}`);
+  const b = await mgr.genmove('W');
+  console.log(`  白 ${b.move}  ${b.elapsedMs}ms  ${rate(b.elapsedMs, 2000)}`);
+  console.log(`  引擎记录局面：${mgr.history.length} 手`);
+
+  step('切到省电模式（引擎重启 → 局面自动恢复）');
+  const sw = await mgr.setPerfMode('balanced');
+  console.log(`  changed=${sw.changed} restarted=${sw.restarted} 线程=${sw.tune.numSearchThreads}`);
+  const c = await mgr.genmove('B');
+  console.log(`  黑 ${c.move}  ${c.elapsedMs}ms  ${rate(c.elapsedMs, 2000)}`);
+  console.log(`  引擎记录局面：${mgr.history.length} 手（应比上面多 1）`);
+
+  step('校验局面恢复：往已有黑子处落白子应被引擎拒绝');
+  const occupied = mgr.history.find((m) => m.color === 'B' && m.coord !== 'pass');
+  if (!occupied) {
+    console.log('  ⚠ 没有可用于校验的着法，跳过');
+  } else {
+    try {
+      await mgr.play('W', occupied.coord);
+      console.log(`  ✗ 恢复失败：${occupied.coord} 上已有黑子，引擎却接受了这手棋`);
+      process.exitCode = 1;
+    } catch (err) {
+      console.log(`  ✓ 引擎拒绝 W ${occupied.coord}：${String(err.message).split('\n')[0]}`);
+    }
+  }
+
+  step('完成');
   await mgr.shutdown();
   app.quit();
 }
@@ -762,15 +856,36 @@ app.whenReady().then(async () => {
     return;
   }
 
+  if (ARGV.includes('--perf-test')) {
+    await runPerfTest();
+    return;
+  }
+
   ENGINE_ROOT = resolveEngineRoot();
-  manager = new EngineManager({ rootDir: APP_ROOT, dataDir: DATA_DIR, engineRoot: ENGINE_ROOT, threads: 6 });
+  settings = { ...(await readSettingsFile()) };
+  // 没设置过就默认高吞吐（弱机可以在界面里切回省电）
+  settings.perfMode = normalizePerfMode(settings.perfMode ?? PERF.PERFORMANCE);
+  manager = new EngineManager({
+    rootDir: APP_ROOT,
+    dataDir: DATA_DIR,
+    engineRoot: ENGINE_ROOT,
+    threads: 6,
+    perfMode: settings.perfMode,
+    perfEngines: 1,
+  });
   manager.on('log', (line) => {
     console.log('[engine]', line);
     send('engine:log', line);
   });
   manager.on('crashed', (info) => send('engine:crashed', info));
 
-  spectate = new SpectateRunner({ rootDir: APP_ROOT, dataDir: DATA_DIR, engineRoot: ENGINE_ROOT, threads: 4 });
+  spectate = new SpectateRunner({
+    rootDir: APP_ROOT,
+    dataDir: DATA_DIR,
+    engineRoot: ENGINE_ROOT,
+    threads: 4,
+    perfMode: settings.perfMode,
+  });
   spectate.on('log', (line) => {
     console.log('[spectate]', line);
     send('spectate:log', line);
@@ -914,6 +1029,71 @@ app.whenReady().then(async () => {
       /* 忽略 */
     }
   }
+
+  // ---------------------------------------------------------------- 偏好设置
+  const settingsPath = path.join(DATA_DIR, 'config', 'settings.json');
+
+  async function readSettingsFile() {
+    try {
+      const raw = await fs.readFile(settingsPath, 'utf8');
+      const data = JSON.parse(raw);
+      return data && typeof data === 'object' ? data : {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function writeSettingsFile(patch) {
+    const current = await readSettingsFile();
+    const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    try {
+      await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+      await fs.writeFile(settingsPath, JSON.stringify(next, null, 2), 'utf8');
+    } catch {
+      /* 写入失败不影响本次运行 */
+    }
+    return next;
+  }
+
+  /** 当前性能模式与它换算出来的搜索参数（供界面展示） */
+  function perfSnapshot() {
+    const mode = normalizePerfMode(settings.perfMode);
+    const backendId = manager?.backendId ?? null;
+    const tune = tuningFor({ mode, threads: 6, engines: 1, backendId });
+    const spectateTune = tuningFor({ mode, threads: 4, engines: 2, backendId });
+    return {
+      perfMode: mode,
+      perfLabel: mode === PERF.PERFORMANCE ? '高吞吐' : '省电',
+      backendId,
+      tune,
+      spectateTune,
+      cores: os.cpus().length,
+    };
+  }
+
+  ipcMain.handle('settings:get', () => perfSnapshot());
+
+  ipcMain.handle('settings:set', async (_e, patch = {}) => {
+    if (patch.perfMode !== undefined) {
+      if (spectateBusy) {
+        return { ok: false, reason: '观战/测速进行中，请先停止再切换性能模式', ...perfSnapshot() };
+      }
+      const mode = normalizePerfMode(patch.perfMode);
+      settings = { ...settings, perfMode: mode };
+      await writeSettingsFile({ perfMode: mode });
+      const a = manager ? await manager.setPerfMode(mode) : { changed: false };
+      const b = spectate ? await spectate.setPerfMode(mode) : { changed: false };
+      const restart = Boolean(a.changed || b.changed);
+      if (restart) {
+        send(
+          'engine:log',
+          `性能模式 → ${mode === PERF.PERFORMANCE ? '高吞吐' : '省电'}（引擎将在下一次落子/分析时自动重启）`,
+        );
+      }
+      return { ok: true, restarted: restart, ...perfSnapshot() };
+    }
+    return { ok: true, ...perfSnapshot() };
+  });
 
   ipcMain.handle('setup:check', async () => {
     const hw = await detectHardware();
