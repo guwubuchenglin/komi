@@ -98,3 +98,20 @@ if ($LASTEXITCODE -ne 0) { throw "csc failed with exit code $LASTEXITCODE" }
 
 $item = Get-Item $out
 Write-Host ("built: {0} ({1} KB)" -f $item.FullName, [math]::Round($item.Length / 1KB))
+
+# ---------------------------------------------------------------- 3. uninstaller
+$ucs = Join-Path $PSScriptRoot 'launcher\uninstall.cs'
+$uname = 'Uninstall-Komi.exe'
+$uout = Join-Path $root $uname
+
+Write-Host "compiling -> $uout"
+& $csc /nologo /target:winexe /codepage:65001 /optimize+ `
+    /reference:System.Windows.Forms.dll /reference:System.Drawing.dll `
+    /win32icon:$ico /out:$uout $ucs
+if ($LASTEXITCODE -ne 0) { throw "csc failed with exit code $LASTEXITCODE" }
+
+$uitem = Get-Item $uout
+Write-Host ("built: {0} ({1} KB)" -f $uitem.FullName, [math]::Round($uitem.Length / 1KB))
+
+# 中文名副本由 node 创建（PowerShell 5.1 读 UTF-8 脚本会乱码，别在 ps1 里写中文文件名）
+node (Join-Path $PSScriptRoot 'make-uninstaller-alias.mjs') $root $uout

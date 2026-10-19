@@ -287,6 +287,46 @@ npm start                # 启动
 
 ---
 
+## 设置面板（右上角 ⚙）
+
+一个面板管住四件事，全部写进 `%APPDATA%\Komi\config\settings.json`，重启后仍然生效：
+
+### 计算
+
+| 选项 | 说明 |
+|---|---|
+| **后台计算** | `自动`（有显卡就用显卡）／`仅 GPU`／`仅 CPU`。选「仅 CPU」后引擎只加载 `engine\cpu\katago.exe`，完全不碰显卡；「仅 GPU」在找不到显卡后端时才会退回 CPU |
+| **性能模式** | 高吞吐（按核数放大搜索线程与批次）／省电（少量线程、低发热） |
+| **当前** | 实时显示后端、线程数、批次与性能档位 |
+
+切换计算方式或性能模式后，引擎会在下一次思考时自动重启，**棋局不会丢**（会重放已下的每一手）。
+
+### 跑分
+
+「测试 GPU」「测试 CPU」用当前神经网络各跑一轮 `katago benchmark`，直接给出**每秒访问数**：
+
+```
+✓ GPU · 1072 visits/s · 1064 nnEvals/s · batch 4.6 · 15 线程 · 0.3s
+```
+
+跑分期间会暂停正在搜索的引擎，避免两边抢显卡把成绩拉低；两个按钮互斥，同一时间只跑一个。
+
+### 语言
+
+`中文` / `English` 即时切换（含难度名、按钮、卡片标题、状态栏），选择同样持久化。
+引擎日志与 KataGo 自身输出保持原文——那些是诊断信息，保持原样便于检索。
+
+### 依赖与组件
+
+列出全部组件（权重、DirectML、OpenCL、OpenVINO、ROCm、CUDA 包）的**已安装 / 未安装 / 不适用**与体积；
+「打开组件下载」会重开首次安装向导，这次可以关掉，装完自动刷新状态、不会打断正在下的棋。
+
+### 关于与卸载
+
+显示版本、组件目录、「运行卸载程序」与「打开所在目录」。
+
+---
+
 ## 安装与分发
 
 三种形态，按场景选：
@@ -409,13 +449,26 @@ cudnn*.dll            # cuDNN 9 运行库
 
 ### 卸载
 
-设置 → 应用 → Komi，或：
+**便携版 / 免安装目录**：根目录里的「**卸载 Komi.exe**」（或 `Uninstall-Komi.exe`）双击即可，
+弹窗里可以勾「同时删除 AI 组件与神经网络」。它会先结束正在运行的 Komi / katago 进程、清理桌面与
+开始菜单快捷方式，再删掉整个程序目录（借道临时副本删掉自己）。
+
+支持命令行静默卸载：
+
+```bash
+"卸载 Komi.exe" --silent            # 静默卸载，保留 %APPDATA%\Komi
+"卸载 Komi.exe" --silent --remove-data   # 连组件与神经网络一起删
+```
+
+**MSI 安装版**：用「设置 → 应用 → Komi」或下面的命令（安装目录归 MSI 管，别手动删）：
 
 ```bash
 npm run dist:uninstall
 ```
 
-卸载**不会**删除 `%APPDATA%\Komi`（权重可复用）；要彻底清理手动删掉该目录即可。
+两种方式都**不会**默认删除 `%APPDATA%\Komi`（权重可复用）；要彻底清理，勾选「同时删除 AI 组件」或手动删该目录。
+
+**Linux**：包内有 `uninstall.sh`（`--keep-data` 保留组件，`--system` 删系统级安装）。
 
 ### 自己打包
 
@@ -435,6 +488,7 @@ npm run dist:dir      # 只出免安装目录（dist/win-unpacked）
 ```
 Komi/
 ├── Komi.exe              # 双击启动器（21 KB，带图标）
+├── 卸载 Komi.exe         # 卸载程序（27 KB；Uninstall-Komi.exe 是同一份）
 ├── docs/preview.png          # 界面预览图
 ├── assets/app.ico            # 应用图标（构建脚本生成）
 ├── engine/                   # 引擎与权重（约 1.4 GB，**不入库**；npm run fetch:engine 获取）
@@ -458,7 +512,8 @@ Komi/
 │   │   └── preload.cjs       # contextBridge 白名单 API
 │   ├── renderer/             # 棋盘 UI（Canvas + 原生 JS，无框架）
 │   │   ├── index.html
-│   │   ├── app.js            # 界面逻辑（三种模式）
+│   │   ├── app.js            # 界面逻辑（三种模式 + 设置面板）
+│   │   ├── i18n.js           # 中英文案字典（data-i18n / T()）
 │   │   ├── styles.css
 │   │   └── rules.global.js   # 由 shared/board.js 生成（启动时自愈）
 │   └── shared/
@@ -468,10 +523,12 @@ Komi/
 ├── build/electron-builder.yml # 打包配置（MSI / 免安装目录）
 ├── dist/                     # 打包输出（MSI 与 win-unpacked）
 ├── tools/
-│   ├── launcher/launcher.cs  # 启动器 C# 源码
-│   ├── build-launcher.ps1    # 生成图标 + 编译 exe
-│   ├── build-renderer.mjs    # 生成 rules.global.js
-│   └── fetch.mjs             # 离线下载工具（换权重/引擎用）
+│   ├── launcher/launcher.cs   # 启动器 C# 源码
+│   ├── launcher/uninstall.cs  # 卸载程序 C# 源码
+│   ├── build-launcher.ps1     # 生成图标 + 编译两个 exe
+│   ├── make-uninstaller-alias.mjs # 生成「卸载 Komi.exe」中文名副本
+│   ├── build-renderer.mjs     # 生成 rules.global.js
+│   └── fetch.mjs              # 离线下载工具（换权重/引擎用）
 ├── scripts/                  # 单元测试与自检脚本
 └── config/                   # 运行时生成（GTP 配置、后端记录）
 ```

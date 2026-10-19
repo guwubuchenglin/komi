@@ -32,9 +32,21 @@ contextBridge.exposeInMainWorld('go', {
   downloadConfig: () => ipcRenderer.invoke('download:get'),
   setDownloadSource: (mode) => ipcRenderer.invoke('download:set', mode),
 
-  // 偏好设置（性能模式）
+  // 偏好设置（性能模式 / 计算方式 / 语言）
   settings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
+
+  // 组件与依赖
+  componentsList: () => ipcRenderer.invoke('components:list'),
+
+  // 跑分（CPU / GPU）
+  benchmarkTargets: () => ipcRenderer.invoke('benchmark:targets'),
+  benchmarkRun: (opts) => ipcRenderer.invoke('benchmark:run', opts),
+  onBenchmarkProgress: on('benchmark:progress'),
+
+  // 卸载与路径
+  openUninstaller: () => ipcRenderer.invoke('app:openUninstaller'),
+  revealInFolder: (target) => ipcRenderer.invoke('shell:reveal', target),
 
   // 首次安装向导
   setupCheck: () => ipcRenderer.invoke('setup:check'),

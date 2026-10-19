@@ -18,6 +18,7 @@ import {
   runtimeParamsFor,
   tuningFor,
   normalizePerfMode,
+  normalizeBackendMode,
   PERF,
   BACKEND,
 } from './difficulty.js';
@@ -74,6 +75,7 @@ export class EngineManager extends EventEmitter {
     perfMode = PERF.BALANCED,
     perfEngines = 1,
     trackHistory = true,
+    backendMode = 'auto',
   }) {
     super();
     this.rootDir = rootDir;
@@ -82,6 +84,8 @@ export class EngineManager extends EventEmitter {
     this.perfMode = normalizePerfMode(perfMode);
     this.perfEngines = Math.max(1, perfEngines);
     this.trackHistory = trackHistory;
+    // 后台计算方式：auto = 有 GPU 就用 GPU；gpu = 只用 GPU；cpu = 只用 CPU
+    this.backendMode = normalizeBackendMode(backendMode);
     this.tune = tuningFor({ mode: this.perfMode, threads, engines: this.perfEngines });
     // engine 目录可能是随包内置的（离线版），也可能是首次运行下载到用户目录的（精简安装）
     this.engineDir = engineRoot ?? path.join(rootDir, 'engine');
@@ -194,8 +198,18 @@ export class EngineManager extends EventEmitter {
     return this.backends;
   }
 
-  /** 候选后端顺序：环境变量覆盖 > 上次成功的 > 默认优先级 */
+  /** 候选后端顺序：强制计算方式 > 环境变量覆盖 > 默认优先级 */
   preferredBackends() {
+    if (!process.env.GO_BACKEND && this.backendMode === 'cpu') {
+      const cpu = this.backends.filter((b) => b.id === 'cpu');
+      if (cpu.length) return cpu;
+      this._note('设置里选择「仅 CPU」，但没找到 CPU 版引擎，回退到自动选择');
+    }
+    if (!process.env.GO_BACKEND && this.backendMode === 'gpu') {
+      const gpu = this.backends.filter((b) => b.id !== 'cpu');
+      if (gpu.length) return gpu;
+      this._note('设置里选择「仅 GPU」，但没找到 GPU 版引擎，回退到自动选择');
+    }
     const forced =
       process.env.GO_BACKEND ||
       (process.argv.find((a) => a.startsWith('--backend=')) ?? '').split('=')[1] ||
@@ -207,6 +221,22 @@ export class EngineManager extends EventEmitter {
     }
     // 顺序固定按优先级：总是优先尝试最好的后端，避免旧缓存把机器钉在次优后端上
     return [...this.backends];
+  }
+
+  /** 切换后台计算方式（auto / gpu / cpu）；改了要重启引擎才生效 */
+  async setBackendMode(mode) {
+    const next = normalizeBackendMode(mode);
+    if (next === this.backendMode) return { changed: false, restarted: false, backendMode: next };
+    this.backendMode = next;
+    const wasRunning = Boolean(this.engine?.running);
+    if (this.engine) {
+      await this.engine.stop().catch(() => {});
+      this.engine = null;
+      this.activeKey = null;
+    }
+    const label = next === 'cpu' ? '仅 CPU' : next === 'gpu' ? '仅 GPU' : '自动';
+    this._note(`后台计算方式 → ${label}（下次启动引擎时生效）`);
+    return { changed: true, restarted: wasRunning, backendMode: next };
   }
 
   _cfgKey(level, backendId) {

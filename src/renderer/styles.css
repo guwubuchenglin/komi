@@ -959,3 +959,85 @@ button.mini {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------- 设置面板 */
+.gear {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+}
+.gear:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.settings-body {
+  width: min(760px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  text-align: left;
+}
+.settings-body h2 {
+  text-align: center;
+}
+.settings-body .field-row label {
+  flex: 1;
+}
+.settings-body .hint {
+  margin-bottom: 6px;
+}
+
+.set-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.set-section-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.set-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 6px;
+}
+
+.deps-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  font-size: 12px;
+}
+.deps-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+}
+.deps-list li .dep-name {
+  color: var(--text);
+  min-width: 190px;
+}
+.deps-list li .dep-state {
+  font-weight: 600;
+}
+.deps-ok {
+  color: #4caf7d;
+}
+.deps-missing {
+  color: #e0695f;
+}
+.deps-na {
+  color: #8a7f6a;
+}

@@ -29,6 +29,20 @@ export function normalizePerfMode(mode) {
   return mode === PERF.PERFORMANCE ? PERF.PERFORMANCE : PERF.BALANCED;
 }
 
+/** 后台计算方式：auto（自动）/ gpu（只用显卡）/ cpu（只用处理器） */
+export const BACKEND_MODE = { AUTO: 'auto', GPU: 'gpu', CPU: 'cpu' };
+
+export function normalizeBackendMode(mode) {
+  return mode === BACKEND_MODE.GPU || mode === BACKEND_MODE.CPU ? mode : BACKEND_MODE.AUTO;
+}
+
+/** 界面语言 */
+export const LANGS = ['zh', 'en'];
+
+export function normalizeLang(lang) {
+  return LANGS.includes(lang) ? lang : 'zh';
+}
+
 /**
  * 计算搜索线程 / 批次大小 / NN server 线程数。
  * @param {object} o
@@ -191,6 +205,27 @@ export const LEVELS = [
 
 export const DEFAULT_LEVEL_ID = "lv4";
 
+/** 英文界面用的档位名（中文名保留在 label / rank 里） */
+const EN_LEVELS = {
+  lv1: { label: "Beginner", rank: "~20 kyu" },
+  lv2: { label: "Novice", rank: "~15 kyu" },
+  lv3: { label: "Elementary", rank: "~10 kyu" },
+  lv4: { label: "Intermediate", rank: "~5 kyu" },
+  lv5: { label: "Upper-mid", rank: "~2 kyu" },
+  lv6: { label: "Advanced", rank: "~1 dan" },
+  lv7: { label: "Low dan", rank: "~3 dan" },
+  lv8: { label: "High dan", rank: "~5 dan" },
+  lv9: { label: "Pro", rank: "Pro level" },
+  lv10: { label: "Superhuman", rank: "Beyond human" },
+};
+for (const lv of LEVELS) {
+  const en = EN_LEVELS[lv.id];
+  if (en) {
+    lv.labelEn = en.label;
+    lv.rankEn = en.rank;
+  }
+}
+
 export function levelById(id) {
   return LEVELS.find((l) => l.id === id) ?? LEVELS.find((l) => l.id === DEFAULT_LEVEL_ID);
 }
@@ -316,11 +351,12 @@ export function runtimeParamsFor(level) {
 }
 
 /** 档位用于 UI 展示的完整描述 */
-export function describeLevel(level) {
+export function describeLevel(level, lang = 'zh') {
+  const en = lang === 'en';
   return {
     id: level.id,
-    label: level.label,
-    rank: level.rank,
+    label: (en && level.labelEn) || level.label,
+    rank: (en && level.rankEn) || level.rank,
     note: level.note,
     backend: level.backend,
     maxVisits: level.maxVisits,

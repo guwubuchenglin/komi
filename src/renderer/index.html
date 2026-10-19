@@ -15,54 +15,55 @@
         <div class="brand">
           <span class="logo">碁</span>
           <span class="title">Komi</span>
-          <span class="sub">内置 KataGo</span>
+          <span class="sub" data-i18n="app.sub">内置 KataGo</span>
         </div>
 
         <nav class="modes" id="modeNav">
-          <button class="mode-btn active" data-mode="play">人机对弈</button>
-          <button class="mode-btn" data-mode="spectate">AI 观战</button>
-          <button class="mode-btn" data-mode="review">棋谱复盘</button>
+          <button class="mode-btn active" data-mode="play" data-i18n="mode.play">人机对弈</button>
+          <button class="mode-btn" data-mode="spectate" data-i18n="mode.spectate">AI 观战</button>
+          <button class="mode-btn" data-mode="review" data-i18n="mode.review">棋谱复盘</button>
         </nav>
 
         <div class="settings">
           <label id="levelWrap">
-            难度
+            <span data-i18n="set.level">难度</span>
             <select id="levelSelect"></select>
           </label>
           <label
             id="perfWrap"
-            title="高吞吐：按 CPU 核数为引擎分配更多搜索线程与更大批次，每秒访问数更高（实测 2080 Ti 从 380 提升到 1140+）。省电：少量线程、低发热，笔记本更安静。切换后引擎会在下一次思考时重启，局面自动恢复。"
+            data-i18n-title="settings.perfMode.desc"
+            title="高吞吐：按 CPU 核数为引擎分配更多搜索线程与更大批次。省电：少量线程、低发热。"
           >
-            性能
+            <span data-i18n="set.perf">性能</span>
             <select id="perfSelect">
-              <option value="performance">高吞吐</option>
-              <option value="balanced">省电</option>
+              <option value="performance" data-i18n="perf.performance">高吞吐</option>
+              <option value="balanced" data-i18n="perf.balanced">省电</option>
             </select>
           </label>
           <label>
-            棋盘
+            <span data-i18n="set.size">棋盘</span>
             <select id="sizeSelect">
-              <option value="9">9 路</option>
-              <option value="13">13 路</option>
-              <option value="19" selected>19 路</option>
+              <option value="9" data-i18n="size.9">9 路</option>
+              <option value="13" data-i18n="size.13">13 路</option>
+              <option value="19" selected data-i18n="size.19">19 路</option>
             </select>
           </label>
           <label>
-            贴目
+            <span data-i18n="set.komi">贴目</span>
             <input id="komiInput" type="number" step="0.5" value="7.5" min="-10" max="30" />
           </label>
           <label id="mirrorWrap" title="组件下载使用的源；已安装完组件后不影响对局">
-            下载源
+            <span data-i18n="set.mirror">下载源</span>
             <select id="mirrorSelect">
-              <option value="auto">自动</option>
-              <option value="direct">官方直连</option>
-              <option value="china">国内镜像</option>
+              <option value="auto" data-i18n="mirror.auto">自动</option>
+              <option value="direct" data-i18n="mirror.direct">官方直连</option>
+              <option value="china" data-i18n="mirror.china">国内镜像</option>
             </select>
           </label>
           <label id="handicapWrap">
-            让子
+            <span data-i18n="set.handicap">让子</span>
             <select id="handicapSelect">
-              <option value="0" selected>无</option>
+              <option value="0" selected data-i18n="handicap.none">无</option>
               <option value="2">2 子</option>
               <option value="3">3 子</option>
               <option value="4">4 子</option>
@@ -73,6 +74,7 @@
               <option value="9">9 子</option>
             </select>
           </label>
+          <button id="btnSettings" class="gear" data-i18n-title="set.settings" title="设置">⚙</button>
         </div>
       </header>
 
@@ -82,92 +84,93 @@
             <canvas id="board"></canvas>
             <div id="thinking" class="thinking hidden">
               <span class="spinner"></span>
-              <span id="thinkingText">AI 思考中…</span>
+              <span id="thinkingText" data-i18n="thinking">AI 思考中…</span>
             </div>
             <div id="modeBadge" class="mode-badge hidden"></div>
           </div>
 
           <div class="toolbar">
             <div class="btn-group" data-mode="play">
-              <button id="btnNew" class="primary">新对局</button>
-              <button id="btnUndo">悔棋</button>
-              <button id="btnPass">停一手</button>
-              <button id="btnResign" class="danger">认输</button>
-              <button id="btnScore">形势判断</button>
+              <button id="btnNew" class="primary" data-i18n="btn.new">新对局</button>
+              <button id="btnUndo" data-i18n="btn.undo">悔棋</button>
+              <button id="btnPass" data-i18n="btn.pass">停一手</button>
+              <button id="btnResign" class="danger" data-i18n="btn.resign">认输</button>
+              <button id="btnScore" data-i18n="btn.score">形势判断</button>
             </div>
 
             <div class="btn-group hidden" data-mode="spectate">
-              <button id="btnSpectateStart" class="primary">开始观战</button>
-              <button id="btnSpectatePause">暂停</button>
-              <button id="btnSpectateStop">停止</button>
-              <button id="btnMatch">测速对局</button>
+              <button id="btnSpectateStart" class="primary" data-i18n="btn.spectateStart">开始观战</button>
+              <button id="btnSpectatePause" data-i18n="btn.spectatePause">暂停</button>
+              <button id="btnSpectateStop" data-i18n="btn.spectateStop">停止</button>
+              <button id="btnMatch" data-i18n="btn.match">测速对局</button>
             </div>
 
             <div class="btn-group hidden" data-mode="review">
-              <button id="btnOpenSgf" class="primary">打开棋谱</button>
-              <button id="btnReviewPrev">◀ 上一手</button>
-              <button id="btnReviewNext">下一手 ▶</button>
-              <button id="btnReviewBlunder">下个恶手</button>
+              <button id="btnOpenSgf" class="primary" data-i18n="btn.openSgf">打开棋谱</button>
+              <button id="btnReviewPrev" data-i18n="btn.reviewPrev">◀ 上一手</button>
+              <button id="btnReviewNext" data-i18n="btn.reviewNext">下一手 ▶</button>
+              <button id="btnReviewBlunder" data-i18n="btn.reviewBlunder">下个恶手</button>
             </div>
 
-            <button id="btnSaveSgf">保存棋谱</button>
+            <button id="btnSaveSgf" data-i18n="btn.saveSgf">保存棋谱</button>
 
             <div class="spacer"></div>
-            <label class="chip"><input id="chkCandidates" type="checkbox" checked /> 候选点</label>
-            <label class="chip"><input id="chkPolicy" type="checkbox" checked /> 落子概率</label>
-            <label class="chip"><input id="chkOwnership" type="checkbox" /> 形势图</label>
-            <label class="chip"><input id="chkNumbers" type="checkbox" /> 手数</label>
+            <label class="chip"><input id="chkCandidates" type="checkbox" checked /> <span data-i18n="chip.candidates">候选点</span></label>
+            <label class="chip"><input id="chkPolicy" type="checkbox" checked /> <span data-i18n="chip.policy">落子概率</span></label>
+            <label class="chip"><input id="chkOwnership" type="checkbox" /> <span data-i18n="chip.ownership">形势图</span></label>
+            <label class="chip"><input id="chkNumbers" type="checkbox" /> <span data-i18n="chip.numbers">手数</span></label>
           </div>
         </section>
 
         <aside class="sidebar">
           <div class="card" id="statusCard">
-            <div class="card-title">局面</div>
-            <div class="stat-row"><span>轮到</span><strong id="turnText">黑</strong></div>
-            <div class="stat-row"><span>手数</span><strong id="moveCount">0</strong></div>
-            <div class="stat-row"><span>提子 黑/白</span><strong id="captureText">0 / 0</strong></div>
-            <div class="stat-row"><span>胜率</span><strong id="winrateText">—</strong></div>
-            <div class="stat-row"><span>目差</span><strong id="scoreLeadText">—</strong></div>
+            <div class="card-title" data-i18n="card.position">局面</div>
+            <div class="stat-row"><span data-i18n="pos.turn">轮到</span><strong id="turnText">黑</strong></div>
+            <div class="stat-row"><span data-i18n="pos.moves">手数</span><strong id="moveCount">0</strong></div>
+            <div class="stat-row"><span data-i18n="pos.captures">提子 黑/白</span><strong id="captureText">0 / 0</strong></div>
+            <div class="stat-row"><span data-i18n="pos.winrate">胜率</span><strong id="winrateText">—</strong></div>
+            <div class="stat-row"><span data-i18n="pos.score">目差</span><strong id="scoreLeadText">—</strong></div>
           </div>
 
           <div class="card" id="metricsCard">
-            <div class="card-title">系统占用</div>
+            <div class="card-title" data-i18n="card.metrics">系统占用</div>
             <div class="meter-row">
-              <span class="meter-label">CPU</span>
+              <span class="meter-label" data-i18n="metrics.cpu">CPU</span>
               <div class="meter"><i id="cpuBar" class="meter-fill"></i></div>
               <b id="cpuText">—</b>
             </div>
             <div class="meter-row">
-              <span class="meter-label">GPU</span>
+              <span class="meter-label" data-i18n="metrics.gpu">GPU</span>
               <div class="meter"><i id="gpuBar" class="meter-fill"></i></div>
               <b id="gpuText">—</b>
             </div>
             <div class="meter-row">
-              <span class="meter-label">显存</span>
+              <span class="meter-label" data-i18n="metrics.vram">显存</span>
               <div class="meter"><i id="vramBar" class="meter-fill"></i></div>
               <b id="vramText">—</b>
             </div>
             <div class="stat-row backend-row">
-              <span>计算后端</span><strong id="backendText">检测中…</strong>
+              <span data-i18n="metrics.backend">计算后端</span><strong id="backendText">检测中…</strong>
             </div>
             <div class="stat-row backend-row">
-              <span>搜索线程</span><strong id="perfText">—</strong>
+              <span data-i18n="metrics.threads">搜索线程</span><strong id="perfText">—</strong>
             </div>
             <div class="stat-row backend-row">
-              <span>组件目录</span>
+              <span data-i18n="metrics.engineDir">组件目录</span>
               <strong id="engineDirText" class="dir-text">—</strong>
-              <button id="btnChooseDir" class="mini">更改</button>
+              <button id="btnChooseDir" class="mini" data-i18n="btn.change">更改</button>
             </div>
           </div>
 
           <div class="card hidden" id="spectateCard">
-            <div class="card-title">观战设置</div>
+            <div class="card-title" data-i18n="card.spectate">观战设置</div>
             <div class="field-row">
-              <label>黑方 <select id="specBlack"></select></label>
-              <label>白方 <select id="specWhite"></select></label>
+              <label><span data-i18n="spec.black">黑方</span> <select id="specBlack"></select></label>
+              <label><span data-i18n="spec.white">白方</span> <select id="specWhite"></select></label>
             </div>
             <div class="field-row">
-              <label>速度
+              <label>
+                <span data-i18n="spec.speed">速度</span>
                 <select id="specSpeed">
                   <option value="slow">慢慢看</option>
                   <option value="normal" selected>标准</option>
@@ -176,51 +179,51 @@
                   <option value="custom">自定义</option>
                 </select>
               </label>
-              <label>手数上限 <input id="specMaxMoves" type="number" value="240" min="20" max="600" /></label>
+              <label><span data-i18n="spec.maxMoves">手数上限</span> <input id="specMaxMoves" type="number" value="240" min="20" max="600" /></label>
             </div>
             <div class="field-row">
-              <label>每手访问 <input id="specVisits" type="number" value="60" min="1" max="2000" /></label>
-              <label>落子间隔 <input id="specPace" type="number" value="300" min="0" max="3000" /></label>
+              <label><span data-i18n="spec.visits">每手访问</span> <input id="specVisits" type="number" value="60" min="1" max="2000" /></label>
+              <label><span data-i18n="spec.pace">落子间隔</span> <input id="specPace" type="number" value="300" min="0" max="3000" /></label>
             </div>
             <div class="field-row">
-              <label>测速局数 <input id="specGames" type="number" value="6" min="2" max="40" /></label>
+              <label><span data-i18n="spec.games">测速局数</span> <input id="specGames" type="number" value="6" min="2" max="40" /></label>
             </div>
             <div class="hint" id="specSpeedHint">标准：每手 60 访问 + 间隔 300ms</div>
-            <div class="hint" id="specStatus">选择双方难度后点「开始观战」</div>
+            <div class="hint" id="specStatus" data-i18n="spec.idle">选择双方难度后点「开始观战」</div>
           </div>
 
           <div class="card hidden" id="reviewCard">
-            <div class="card-title">复盘</div>
-            <div class="hint" id="reviewStatus">打开一个 SGF 棋谱开始复盘</div>
+            <div class="card-title" data-i18n="card.review">复盘</div>
+            <div class="hint" id="reviewStatus" data-i18n="review.idle">打开一个 SGF 棋谱开始复盘</div>
             <div class="progress-wrap hidden" id="reviewProgressWrap">
               <div class="progress"><div class="progress-bar" id="reviewProgressBar"></div></div>
-              <div class="hint" id="reviewProgressText">分析中…</div>
+              <div class="hint" id="reviewProgressText" data-i18n="review.analyzing">分析中…</div>
             </div>
-            <div class="card-title" style="margin-top: 12px">恶手列表</div>
+            <div class="card-title" style="margin-top: 12px" data-i18n="review.blunders">恶手列表</div>
             <ol class="blunder-list" id="blunderList">
-              <li class="muted">尚未复盘</li>
+              <li class="muted" data-i18n="review.notYet">尚未复盘</li>
             </ol>
           </div>
 
           <div class="card">
-            <div class="card-title" id="candidatesTitle">AI 候选点（白方胜率）</div>
+            <div class="card-title" id="candidatesTitle" data-i18n="candidatesTitle.play">AI 候选点（白方胜率）</div>
             <ol id="candidateList" class="candidates">
-              <li class="muted">等待对局开始…</li>
+              <li class="muted" data-i18n="candidates.waiting">等待对局开始…</li>
             </ol>
           </div>
 
           <div class="card">
-            <div class="card-title" id="chartTitle">胜率走势</div>
+            <div class="card-title" id="chartTitle" data-i18n="chartTitle.play">胜率走势</div>
             <canvas id="winrateChart" width="320" height="104"></canvas>
             <div class="chart-hint">
               <span><i class="sw sw-black"></i><b id="hintBlack">黑 0.0%</b></span>
               <span><i class="sw sw-white"></i><b id="hintWhite">白 0.0%</b></span>
-              <span class="chart-hint-note">面积＝胜率占比</span>
+              <span class="chart-hint-note" data-i18n="chart.note">面积＝胜率占比</span>
             </div>
           </div>
 
           <div class="card grow">
-            <div class="card-title">引擎日志</div>
+            <div class="card-title" data-i18n="card.log">引擎日志</div>
             <div id="logBox" class="log"></div>
           </div>
         </aside>
@@ -229,60 +232,136 @@
       <div id="setupScreen" class="setup-screen hidden">
         <div class="setup-box">
           <div class="setup-logo">碁</div>
-          <h2>首次使用 · 环境检测与组件安装</h2>
-          <p class="setup-desc">
-            安装包只含程序本体。下面按你的显卡环境列出了需要的运行组件，<b>勾选后下载</b>，
+          <h2 data-i18n="setup.title">首次使用 · 环境检测与组件安装</h2>
+          <p class="setup-desc" data-i18n="setup.desc">
+            安装包只含程序本体。下面按你的显卡环境列出了需要的运行组件，勾选后下载，
             只需一次，之后完全离线。
           </p>
 
-          <div class="setup-hw" id="setupHw">正在检测硬件…</div>
+          <div class="setup-hw" id="setupHw" data-i18n="setup.detecting">正在检测硬件…</div>
 
           <label class="setup-mirror">
             <input type="checkbox" id="chkMirror" />
-            <span>使用国内镜像加速下载（GitHub 代理 + 清华 PyPI 源）</span>
+            <span data-i18n="setup.mirror">使用国内镜像加速下载（GitHub 代理 + 清华 PyPI 源）</span>
           </label>
           <div class="hint" id="mirrorHint"></div>
 
           <div class="setup-dir">
-            <span>组件将安装到</span>
+            <span data-i18n="setup.dir">组件将安装到</span>
             <code id="setupDir">—</code>
-            <button id="btnSetupDir" class="mini">更改</button>
+            <button id="btnSetupDir" class="mini" data-i18n="btn.change">更改</button>
           </div>
 
           <ul id="setupList" class="setup-list"></ul>
 
           <div class="setup-total">
-            <span>已选组件合计</span>
+            <span data-i18n="setup.total">已选组件合计</span>
             <b id="setupTotal">—</b>
           </div>
 
           <div class="progress-wrap hidden" id="setupProgressWrap">
             <div class="progress"><div class="progress-bar" id="setupProgressBar"></div></div>
-            <div class="hint" id="setupProgressText">准备中…</div>
+            <div class="hint" id="setupProgressText" data-i18n="setup.preparing">准备中…</div>
           </div>
 
           <div class="setup-actions">
-            <button id="btnSetupInstall" class="primary">下载并安装</button>
+            <button id="btnSetupInstall" class="primary" data-i18n="setup.install">下载并安装</button>
+            <button id="btnSetupClose" class="mini hidden" data-i18n="btn.close">关闭</button>
           </div>
 
-          <div class="hint" id="setupHint">下载完成后会自动进入游戏。</div>
+          <div class="hint" id="setupHint" data-i18n="setup.doneHint">下载完成后会自动进入游戏。</div>
           <ul class="setup-verify hidden" id="setupVerify"></ul>
+        </div>
+      </div>
+
+      <div id="settingsModal" class="modal hidden">
+        <div class="modal-body settings-body">
+          <h2 data-i18n="settings.title">设置</h2>
+
+          <section class="set-section">
+            <div class="set-section-title" data-i18n="settings.compute">计算</div>
+            <div class="field-row">
+              <label>
+                <span data-i18n="settings.backendMode">后台计算</span>
+                <select id="setBackendMode">
+                  <option value="auto" data-i18n="settings.backendMode.auto">自动（推荐）</option>
+                  <option value="gpu" data-i18n="settings.backendMode.gpu">仅 GPU</option>
+                  <option value="cpu" data-i18n="settings.backendMode.cpu">仅 CPU</option>
+                </select>
+              </label>
+              <label>
+                <span data-i18n="settings.perfMode">性能模式</span>
+                <select id="setPerfMode">
+                  <option value="performance" data-i18n="perf.performance">高吞吐</option>
+                  <option value="balanced" data-i18n="perf.balanced">省电</option>
+                </select>
+              </label>
+            </div>
+            <div class="hint" data-i18n="settings.backendMode.desc"></div>
+            <div class="hint" id="setComputeInfo">—</div>
+
+            <div class="set-section-title" style="margin-top: 12px" data-i18n="settings.benchmark">跑分（每秒访问数）</div>
+            <div class="hint" data-i18n="settings.benchmark.desc"></div>
+            <div class="set-actions">
+              <button id="btnBenchGpu" class="mini" data-i18n="settings.benchGpu">测试 GPU</button>
+              <button id="btnBenchCpu" class="mini" data-i18n="settings.benchCpu">测试 CPU</button>
+            </div>
+            <div class="hint" id="benchStatus">—</div>
+          </section>
+
+          <section class="set-section">
+            <div class="set-section-title" data-i18n="settings.language">语言</div>
+            <div class="field-row">
+              <label>
+                <span data-i18n="settings.lang">界面语言</span>
+                <select id="setLang">
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+            </div>
+            <div class="hint" data-i18n="settings.lang.desc"></div>
+          </section>
+
+          <section class="set-section">
+            <div class="set-section-title" data-i18n="settings.deps">依赖与组件</div>
+            <div class="hint" data-i18n="settings.deps.desc"></div>
+            <ul id="depsList" class="deps-list"></ul>
+            <div class="set-actions">
+              <button id="btnOpenSetup" class="mini primary" data-i18n="settings.deps.open">打开组件下载</button>
+              <button id="btnRefreshDeps" class="mini" data-i18n="settings.deps.refresh">刷新状态</button>
+            </div>
+          </section>
+
+          <section class="set-section">
+            <div class="set-section-title" data-i18n="settings.about">关于与卸载</div>
+            <div class="hint" id="setAbout">—</div>
+            <div class="set-actions">
+              <button id="btnRunUninstall" class="mini danger" data-i18n="settings.uninstall">运行卸载程序</button>
+              <button id="btnOpenEngineDir" class="mini" data-i18n="settings.openFolder">打开所在目录</button>
+            </div>
+          </section>
+
+          <div class="modal-actions">
+            <button id="btnSettingsClose" class="primary" data-i18n="btn.close">关闭</button>
+          </div>
         </div>
       </div>
 
       <div id="resultModal" class="modal hidden">
         <div class="modal-body">
-          <h2 id="resultTitle">对局结束</h2>
+          <h2 id="resultTitle" data-i18n="result.title">对局结束</h2>
           <p id="resultDetail"></p>
           <div class="modal-actions">
-            <button id="btnResultClose">查看棋盘</button>
-            <button id="btnResultNew" class="primary">再来一局</button>
+            <button id="btnResultClose" data-i18n="result.viewBoard">查看棋盘</button>
+            <button id="btnResultNew" class="primary" data-i18n="result.again">再来一局</button>
           </div>
         </div>
       </div>
     </div>
 
     <script src="./rules.global.js"></script>
+    <script src="./i18n.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

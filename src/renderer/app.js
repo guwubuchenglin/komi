@@ -7,11 +7,17 @@
 
   const el = (id) => document.getElementById(id);
 
+  // 多语言小工具：静态文案靠 data-i18n，动态文案用 T()
+  const T = (k, vars) => (window.KomiI18n ? window.KomiI18n.t(k, vars) : k);
+  const isEn = () => Boolean(window.KomiI18n && window.KomiI18n.getLang() === "en");
+  const colorWord = (c) => (isEn() ? (c === R.BLACK ? "Black" : "White") : c === R.BLACK ? "黑" : "白");
+
   // 各尺寸的平衡贴目（实测：KataGo 4000 访问下黑棋胜率接近 50% 的取值）
   const KOMI_BY_SIZE = { 9: 7, 13: 7, 19: 7.5 };
 
   const S = {
     mode: "play", // play | spectate | review
+    settings: null,
     spectate: { running: false, paused: false },
     stopRequested: false,
     policies: { B: null, W: null },
@@ -70,6 +76,17 @@
     S.ctx = S.canvas.getContext("2d");
     setupCanvas();
 
+    // 先取偏好设置：语言要在渲染任何文案之前生效
+    try {
+      S.settings = await api.settings();
+      if (window.KomiI18n) {
+        window.KomiI18n.setLang(S.settings.lang);
+        window.KomiI18n.apply();
+      }
+    } catch {
+      /* 旧版主进程没有 settings 接口 */
+    }
+
     const levels = await api.levels();
     S.levels = levels;
     const sel = el("levelSelect");
@@ -77,7 +94,7 @@
     for (const lv of levels) {
       const opt = document.createElement("option");
       opt.value = lv.id;
-      opt.textContent = `${lv.label} · ${lv.rank}${lv.isHumanStyle ? " · 拟人" : ""}`;
+      opt.textContent = `${lv.label} · ${lv.rank}${lv.isHumanStyle ? (isEn() ? " · Human" : " · 拟人") : ""}`;
       sel.appendChild(opt);
     }
     sel.value = S.levelId;
@@ -306,7 +323,8 @@
     // 性能模式（高吞吐 / 省电）
     let refreshPerfInfo = async () => {};
     try {
-      const st = await api.settings();
+      const st = S.settings ?? (await api.settings());
+      S.settings = st;
       const perfSel = el("perfSelect");
       let previous = st.perfMode === "balanced" ? "balanced" : "performance";
       perfSel.value = previous;
@@ -325,6 +343,8 @@
     } catch {
       /* 旧版主进程没有 settings 接口时忽略 */
     }
+
+    bindSettingsUI();
 
     const started = await ensureComponentsThenStart();
     if (!started) return;
@@ -620,11 +640,14 @@
     if (!S.game) return;
     const isReview = S.mode === "review" && S.review?.timeline;
     if (isReview) {
-      el("turnText").textContent = `第 ${S.review.index} 手`;
+      el("turnText").textContent = isEn() ? `Move ${S.review.index}` : `第 ${S.review.index} 手`;
     } else if (S.mode === "spectate") {
-      el("turnText").textContent = `${colorName(S.game.turn)}（AI）`;
+      el("turnText").textContent = `${colorWord(S.game.turn)}${isEn() ? " (AI)" : "（AI）"}`;
     } else {
-      el("turnText").textContent = colorName(S.game.turn) + (S.game.turn === S.humanColor ? "（你）" : "（AI）");
+      const me = S.game.turn === S.humanColor;
+      el("turnText").textContent = isEn()
+        ? `${colorWord(S.game.turn)} (${me ? "you" : "AI"})`
+        : colorWord(S.game.turn) + (me ? "（你）" : "（AI）");
     }
     el("moveCount").textContent = S.game.moveNumber;
     el("captureText").textContent = `${S.game.captures[R.BLACK]} / ${S.game.captures[R.WHITE]}`;
@@ -643,14 +666,15 @@
 
     if (blackWin != null) {
       const bw = Math.min(1, Math.max(0, blackWin));
+      const en = isEn();
       el("winrateText").innerHTML =
-        `<span class="wr-black">黑 ${(bw * 100).toFixed(1)}%</span>` +
+        `<span class="wr-black">${en ? "B" : "黑"} ${(bw * 100).toFixed(1)}%</span>` +
         `<span class="wr-sep">/</span>` +
-        `<span class="wr-white">白 ${((1 - bw) * 100).toFixed(1)}%</span>`;
+        `<span class="wr-white">${en ? "W" : "白"} ${((1 - bw) * 100).toFixed(1)}%</span>`;
       const hb = el("hintBlack");
       const hw = el("hintWhite");
-      if (hb) hb.textContent = `黑 ${(bw * 100).toFixed(1)}%`;
-      if (hw) hw.textContent = `白 ${((1 - bw) * 100).toFixed(1)}%`;
+      if (hb) hb.textContent = `${en ? "B" : "黑"} ${(bw * 100).toFixed(1)}%`;
+      if (hw) hw.textContent = `${en ? "W" : "白"} ${((1 - bw) * 100).toFixed(1)}%`;
     } else {
       el("winrateText").textContent = "—";
     }
@@ -815,7 +839,7 @@
     el("btnSpectatePause").disabled = !specRunning;
     el("btnSpectateStop").disabled = !specRunning;
     el("btnMatch").disabled = specRunning;
-    el("btnSpectatePause").textContent = S.spectate.paused ? "继续" : "暂停";
+    el("btnSpectatePause").textContent = S.spectate.paused ? T("btn.spectateResume") : T("btn.spectatePause");
   }
 
   // ------------------------------------------------------------------ 绘制
@@ -1231,6 +1255,239 @@
     return select.value;
   }
 
+  // ================================================================== 设置面板
+  const BENCH_LABEL = { gpu: "GPU", cpu: "CPU" };
+
+  const computeLabel = (mode) =>
+    mode === "cpu"
+      ? isEn()
+        ? "CPU only"
+        : "仅 CPU"
+      : mode === "gpu"
+        ? isEn()
+          ? "GPU only"
+          : "仅 GPU"
+        : isEn()
+          ? "Auto"
+          : "自动";
+
+  function bindSettingsUI() {
+    el("btnSettings").addEventListener("click", openSettings);
+    el("btnSettingsClose").addEventListener("click", () => el("settingsModal").classList.add("hidden"));
+    el("settingsModal").addEventListener("click", (e) => {
+      if (e.target === el("settingsModal")) el("settingsModal").classList.add("hidden");
+    });
+
+    el("setPerfMode").addEventListener("change", async () => {
+      const mode = el("setPerfMode").value;
+      el("setPerfMode").disabled = true;
+      try {
+        const res = await api.setSettings({ perfMode: mode });
+        if (!res.ok) log(`性能模式未切换：${res.reason ?? "未知原因"}`);
+        else {
+          el("perfSelect").value = mode;
+          log(`性能模式 → ${res.perfLabel}`);
+        }
+        renderSettingsInfo(res);
+      } catch (err) {
+        log("切换性能模式失败：" + err.message);
+      } finally {
+        el("setPerfMode").disabled = false;
+      }
+    });
+
+    el("setBackendMode").addEventListener("change", async () => {
+      const mode = el("setBackendMode").value;
+      el("setBackendMode").disabled = true;
+      try {
+        const res = await api.setSettings({ backendMode: mode });
+        if (!res.ok) log(`计算方式未切换：${res.reason ?? "未知原因"}`);
+        else log(`后台计算 → ${computeLabel(mode)}${res.restarted ? "（引擎会在下一次思考时重启）" : ""}`);
+        renderSettingsInfo(res);
+      } catch (err) {
+        log("切换计算方式失败：" + err.message);
+      } finally {
+        el("setBackendMode").disabled = false;
+      }
+    });
+
+    el("setLang").addEventListener("change", async () => {
+      const lang = el("setLang").value;
+      try {
+        await api.setSettings({ lang });
+      } catch {
+        /* 主进程写失败也照样切界面 */
+      }
+      await applyLanguage(lang);
+    });
+
+    el("btnBenchGpu").addEventListener("click", () => runBenchmark("gpu"));
+    el("btnBenchCpu").addEventListener("click", () => runBenchmark("cpu"));
+
+    el("btnRefreshDeps").addEventListener("click", () => refreshDeps());
+    el("btnOpenSetup").addEventListener("click", reopenSetupWizard);
+    el("btnRunUninstall").addEventListener("click", async () => {
+      const res = await api.openUninstaller();
+      if (!res.ok) log("卸载：" + res.reason);
+    });
+    el("btnOpenEngineDir").addEventListener("click", () => api.revealInFolder("engineRoot"));
+
+    if (api.onBenchmarkProgress) {
+      api.onBenchmarkProgress(({ target, line }) => {
+        el("benchStatus").textContent = `${BENCH_LABEL[target] ?? target}: ${line}`;
+      });
+    }
+  }
+
+  async function openSettings() {
+    el("settingsModal").classList.remove("hidden");
+    try {
+      const st = await api.settings();
+      S.settings = st;
+      el("setBackendMode").value = st.backendMode ?? "auto";
+      el("setPerfMode").value = st.perfMode ?? "performance";
+      el("setLang").value = st.lang ?? "zh";
+      renderSettingsInfo(st);
+    } catch (err) {
+      el("setComputeInfo").textContent = "读取设置失败：" + err.message;
+    }
+    await refreshDeps();
+  }
+
+  function renderSettingsInfo(st) {
+    if (!st) return;
+    const t = st.tune ?? {};
+    const backend = st.backendLabel
+      ? `${st.backendLabel}${
+          st.backendDetail && String(st.backendDetail).toLowerCase() !== String(st.backendLabel).toLowerCase()
+            ? `（${st.backendDetail}）`
+            : ""
+        }`
+      : isEn()
+        ? "not started"
+        : "未启动";
+    el("setComputeInfo").textContent =
+      `${T("settings.current")}：${backend} · ${t.numSearchThreads ?? "?"} ${isEn() ? "threads" : "线程"} · ` +
+      `batch ${t.nnMaxBatchSize ?? "?"} · ${isEn() ? "perf" : "性能"} ${st.perfLabel ?? "?"}`;
+    const ver = st.version ? `Komi ${st.version}` : "Komi";
+    const un = st.uninstaller ? (isEn() ? "uninstaller found" : "已找到卸载程序") : T("settings.uninstall.none");
+    el("setAbout").textContent = `${ver} · ${st.engineRoot ?? ""} · ${un}`;
+    if (st.perfMode) el("setPerfMode").value = st.perfMode;
+    if (st.backendMode) el("setBackendMode").value = st.backendMode;
+  }
+
+  async function refreshDeps() {
+    const ul = el("depsList");
+    if (!ul) return;
+    ul.innerHTML = "";
+    let data;
+    try {
+      data = await api.componentsList();
+    } catch (err) {
+      const li = document.createElement("li");
+      li.textContent = "读取组件状态失败：" + err.message;
+      ul.appendChild(li);
+      return;
+    }
+    for (const c of data.components) {
+      const li = document.createElement("li");
+      const name = document.createElement("span");
+      name.className = "dep-name";
+      name.textContent = `${c.label}${c.required ? (isEn() ? " (required)" : "（必需）") : ""}`;
+      const state = document.createElement("span");
+      state.className = "dep-state " + (c.installed ? "deps-ok" : c.applicable ? "deps-missing" : "deps-na");
+      state.textContent = c.installed
+        ? T("settings.deps.installed")
+        : c.applicable
+          ? T("settings.deps.missing")
+          : T("settings.deps.na");
+      const size = document.createElement("span");
+      size.textContent = `${Math.round((c.bytes ?? 0) / 1048576)} MB`;
+      li.append(name, state, size);
+      ul.appendChild(li);
+    }
+  }
+
+  async function runBenchmark(target) {
+    const btn = target === "gpu" ? el("btnBenchGpu") : el("btnBenchCpu");
+    const other = target === "gpu" ? el("btnBenchCpu") : el("btnBenchGpu");
+    btn.disabled = true;
+    other.disabled = true;
+    el("benchStatus").textContent = `${T("settings.benchRunning")} ${BENCH_LABEL[target]}`;
+    try {
+      const res = await api.benchmarkRun({ target });
+      if (!res.ok) {
+        el("benchStatus").textContent = `✗ ${BENCH_LABEL[target]}: ${res.reason}`;
+        log(`跑分失败（${BENCH_LABEL[target]}）：${res.reason}`);
+        return;
+      }
+      el("benchStatus").textContent =
+        `✓ ${BENCH_LABEL[target]} · ${res.visits.toFixed(0)} visits/s · ` +
+        `${res.nnEvals.toFixed(0)} nnEvals/s · batch ${res.batchSize.toFixed(1)} · ` +
+        `${res.threads}${isEn() ? " threads" : " 线程"} · ${(res.elapsedMs / 1000).toFixed(1)}s`;
+      log(`跑分 ${BENCH_LABEL[target]}：${res.visits.toFixed(0)} visits/s（${res.nnEvals.toFixed(0)} nnEvals/s）`);
+    } catch (err) {
+      el("benchStatus").textContent = `✗ ${BENCH_LABEL[target]}: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      other.disabled = false;
+    }
+  }
+
+  /** 语言切换：重建下拉项 + 重画动态文案 */
+  async function applyLanguage(lang) {
+    if (window.KomiI18n) {
+      window.KomiI18n.setLang(lang);
+      window.KomiI18n.apply();
+    }
+    try {
+      const levels = await api.levels();
+      S.levels = levels;
+      const keep = {
+        levelSelect: S.levelId,
+        specBlack: el("specBlack").value,
+        specWhite: el("specWhite").value,
+      };
+      for (const id of ["levelSelect", "specBlack", "specWhite"]) {
+        const selEl = el(id);
+        selEl.innerHTML = "";
+        for (const lv of levels) {
+          const opt = document.createElement("option");
+          opt.value = lv.id;
+          opt.textContent = `${lv.label} · ${lv.rank}${
+            lv.isHumanStyle ? (lang === "en" ? " · Human" : " · 拟人") : ""
+          }`;
+          selEl.appendChild(opt);
+        }
+        selEl.value = keep[id];
+      }
+    } catch {
+      /* ignore */
+    }
+    const en = lang === "en";
+    const speedLabels = en
+      ? ["Slow", "Normal", "Fast", "Instant (like Elo match)", "Custom"]
+      : ["慢慢看", "标准", "快", "极速（同测速）", "自定义"];
+    speedLabels.forEach((label, i) => {
+      if (el("specSpeed").options[i]) el("specSpeed").options[i].textContent = label;
+    });
+    for (const opt of el("handicapSelect").options) {
+      opt.textContent = opt.value === "0" ? (en ? "None" : "无") : `${opt.value} ${en ? "stones" : "子"}`;
+    }
+    renderSpectateSpeedHint();
+    renderCandidates();
+    renderStats();
+    if (S.mode === "review" && S.review?.timeline) {
+      try {
+        renderBlunders();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (S.settings) renderSettingsInfo(S.settings);
+    log(en ? "Interface language: English" : "界面语言：中文");
+  }
+
   // ================================================================== 组件目录
   function shortDir(p) {
     if (!p) return "—";
@@ -1283,8 +1540,24 @@
   }
 
   // ================================================================== 首次安装向导
+  let setupProgressOff = null;
+  let setupDoneOff = null;
+  let setupFromSettings = false;
+
   function fmtMB(bytes) {
     return (bytes / 1048576).toFixed(0) + " MB";
+  }
+
+  /** 从设置面板重新打开安装向导（不是首次运行，可以关掉） */
+  async function reopenSetupWizard() {
+    el("settingsModal").classList.add("hidden");
+    try {
+      const setup = await api.setupCheck();
+      setupFromSettings = true;
+      showSetupWizard(setup);
+    } catch (err) {
+      log("读取组件列表失败：" + err.message);
+    }
   }
 
   function showSetupWizard(setup) {
@@ -1292,6 +1565,23 @@
     const list = el("setupList");
     const states = new Map();
     const selected = new Set();
+
+    // 重开向导时先摘掉上一轮的监听，避免进度回调重复触发
+    try {
+      setupProgressOff?.();
+      setupDoneOff?.();
+    } catch {
+      /* ignore */
+    }
+    setupProgressOff = null;
+    setupDoneOff = null;
+
+    el("btnSetupClose").classList.toggle("hidden", !setupFromSettings);
+    el("btnSetupClose").onclick = () => {
+      setupFromSettings = false;
+      screen.classList.add("hidden");
+      refreshDeps().catch(() => {});
+    };
 
     el("setupHw").textContent = setup.hardware?.summary ?? "硬件信息不可用";
     el("setupDir").textContent = setup.engineRoot ?? "—";
@@ -1389,7 +1679,7 @@
       }
     };
 
-    api.onSetupProgress((p) => {
+    setupProgressOff = api.onSetupProgress((p) => {
       const state = states.get(p.id);
       if (state) {
         if (p.phase === "download") state.textContent = p.total ? Math.floor((p.received / p.total) * 100) + "%" : "…";
@@ -1407,7 +1697,7 @@
       }
     });
 
-    api.onSetupDone(async (res) => {
+    setupDoneOff = api.onSetupDone(async (res) => {
       el("setupProgressBar").style.width = "100%";
       el("setupProgressText").textContent = "安装完成，正在校验后端…";
       if (res.checks?.length) {
@@ -1426,7 +1716,13 @@
       await new Promise((r) => setTimeout(r, 900));
       el("setupScreen").classList.add("hidden");
       setThinking(false);
-      await onNewGame();
+      if (setupFromSettings) {
+        // 从设置面板进来的：装完回设置，别打断正在下的一盘棋
+        setupFromSettings = false;
+        await refreshDeps().catch(() => {});
+      } else {
+        await onNewGame();
+      }
     });
   }
 
@@ -1444,12 +1740,11 @@
     el("reviewCard").classList.toggle("hidden", mode !== "review");
     el("levelWrap").classList.toggle("hidden", mode !== "play");
     el("handicapWrap").classList.toggle("hidden", mode === "review");
-    el("candidatesTitle").textContent =
-      mode === "review" ? "当前局面最佳点" : mode === "spectate" ? "落子概率（黑 / 白）" : "AI 候选点（白方胜率）";
-    el("chartTitle").textContent = mode === "review" ? "全盘胜率走势（复盘）" : "胜率走势";
+    el("candidatesTitle").textContent = T(`candidatesTitle.${mode}`);
+    el("chartTitle").textContent = mode === "review" ? T("chartTitle.review") : T("chartTitle.play");
     el("modeBadge").classList.toggle("hidden", mode === "play");
-    if (mode === "spectate") el("modeBadge").textContent = "观战模式";
-    if (mode === "review") el("modeBadge").textContent = "复盘模式";
+    if (mode === "spectate") el("modeBadge").textContent = isEn() ? "Spectating" : "观战模式";
+    if (mode === "review") el("modeBadge").textContent = isEn() ? "Review mode" : "复盘模式";
 
     if (mode !== "spectate" && S.spectate.running) stopSpectate();
     if (mode === "spectate") resetSpectateBoard();
@@ -1566,7 +1861,7 @@
     if (!S.spectate.running) return;
     S.spectate.paused = !S.spectate.paused;
     await api.spectatePause(S.spectate.paused);
-    el("btnSpectatePause").textContent = S.spectate.paused ? "继续" : "暂停";
+    el("btnSpectatePause").textContent = S.spectate.paused ? T("btn.spectateResume") : T("btn.spectatePause");
     el("specStatus").textContent = S.spectate.paused ? "已暂停" : "对局中…";
     updateButtons();
   }

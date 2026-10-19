@@ -24,9 +24,9 @@
     "perf:engine": "npm run build:renderer && electron . --perf-test",
     "gen:sgf": "node scripts/gen-test-sgf.mjs",
     "test:all": "npm run test:rules && npm run test:sgf && npm run test:perf",
-    "dist": "npm run build:renderer && node tools/patch-wix-template.mjs && electron-builder --config build/electron-builder.yml",
-    "dist:msi": "npm run build:renderer && node tools/patch-wix-template.mjs && electron-builder --config build/electron-builder.yml --win msi",
-    "dist:dir": "npm run build:renderer && electron-builder --config build/electron-builder.yml --win dir",
+    "dist": "npm run build:renderer && node tools/patch-wix-template.mjs && electron-builder --config build/electron-builder.yml && node tools/copy-uninstaller.mjs",
+    "dist:msi": "npm run build:renderer && node tools/patch-wix-template.mjs && electron-builder --config build/electron-builder.yml --win msi && node tools/copy-uninstaller.mjs",
+    "dist:dir": "npm run build:renderer && electron-builder --config build/electron-builder.yml --win dir && node tools/copy-uninstaller.mjs",
     "dist:uninstall": "msiexec /x \"dist\\Komi-1.0.1.msi\" /qn",
     "fetch:engine": "node tools/download-engine.mjs"
   },

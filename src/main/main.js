@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
@@ -7,12 +7,23 @@ import { fileURLToPath } from 'node:url';
 import { EngineManager } from './engineManager.js';
 import { SpectateRunner } from './spectate.js';
 import { parseSgf } from '../shared/sgf.js';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { SystemMetrics } from './metrics.js';
-import { COMPONENTS, missingComponents, installSelected, totalBytes, componentById, cleanDownloadCache } from './components.js';
+import { COMPONENTS, missingComponents, installSelected, totalBytes, componentById, cleanDownloadCache, isInstalled } from './components.js';
 import { detectHardware, evaluateComponent, summarize } from './hardware.js';
 import { probeSources } from './mirrors.js';
-import { LEVELS, describeLevel, tuningFor, normalizePerfMode, PERF } from './difficulty.js';
+import {
+  LEVELS,
+  levelById,
+  describeLevel,
+  tuningFor,
+  normalizePerfMode,
+  normalizeBackendMode,
+  normalizeLang,
+  PERF,
+  BACKEND_MODE,
+  LANGS,
+} from './difficulty.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..', '..');
@@ -29,7 +40,9 @@ let spectateBusy = false;
 let uiTestMode = false;
 let metrics = null;
 // 用户偏好（config/settings.json）；默认开高吞吐，弱机可在界面里切回省电
-let settings = { perfMode: PERF.PERFORMANCE };
+let settings = { perfMode: PERF.PERFORMANCE, backendMode: BACKEND_MODE.AUTO, lang: 'zh' };
+// 跑分互斥，避免两个 benchmark 同时抢 GPU
+let benchRunning = false;
 
 // 可写数据目录（安装版里程序目录是只读的）
 const DATA_DIR = app.getPath('userData');
@@ -482,6 +495,86 @@ async function runUiFeatureTest(target) {
     console.log("  导航 index:", nav.reviewIndex, "→ 跳恶手后:", nav2.reviewIndex);
     console.log("  走势图当前手标记:", chart.goldPixels > 0 ? "有" : "无", "(" + chart.width + "x" + chart.height + ")");
 
+    step("设置面板：语言 / 后台计算 / 组件 / 跑分");
+    await js(`document.getElementById('btnSettings').click()`);
+    await wait(1800);
+    const setUi = await js(`(function(){
+      const g = (id) => document.getElementById(id);
+      return {
+        visible: !g('settingsModal').classList.contains('hidden'),
+        lang: g('setLang').value,
+        perf: g('setPerfMode').value,
+        backend: g('setBackendMode').value,
+        info: g('setComputeInfo').textContent,
+        about: g('setAbout').textContent,
+        deps: g('depsList').children.length,
+        depsFirst: g('depsList').children[0] ? g('depsList').children[0].textContent.replace(/\\s+/g, ' ').trim() : '',
+      };
+    })()`);
+    console.log("  设置面板:", JSON.stringify(setUi, null, 2));
+
+    step("语言切换 en → zh");
+    await js(`(function(){ const s = document.getElementById('setLang'); s.value='en'; s.dispatchEvent(new Event('change')); })()`);
+    await wait(2200);
+    const enUi = await js(`(function(){
+      const q = (sel) => document.querySelector(sel);
+      return {
+        lang: document.documentElement.getAttribute('lang'),
+        modeBtn: q('.mode-btn[data-mode="play"]').textContent,
+        saveBtn: document.getElementById('btnSaveSgf').textContent,
+        turnLabel: q('#statusCard .stat-row span').textContent,
+        title: q('#settingsModal h2').textContent,
+      };
+    })()`);
+    console.log("  英文界面:", JSON.stringify(enUi));
+    await js(`(function(){ const s = document.getElementById('setLang'); s.value='zh'; s.dispatchEvent(new Event('change')); })()`);
+    await wait(1800);
+    const zhUi = await js(`(function(){
+      return {
+        lang: document.documentElement.getAttribute('lang'),
+        modeBtn: document.querySelector('.mode-btn[data-mode="play"]').textContent,
+      };
+    })()`);
+    console.log("  切回中文:", JSON.stringify(zhUi));
+
+    step("后台计算：切到仅 CPU 再切回自动");
+    await js(`(function(){ const s = document.getElementById('setBackendMode'); s.value='cpu'; s.dispatchEvent(new Event('change')); })()`);
+    await wait(1500);
+    const cpuMode = await js(`window.go.settings().then((s) => ({ backendMode: s.backendMode, backend: s.backendLabel }))`);
+    console.log("  切到仅 CPU:", JSON.stringify(cpuMode));
+    // 新开一局逼引擎按 CPU 重启
+    const cpuRun = await js(
+      `window.go.newGame({ size: 9, komi: 7, levelId: 'lv8', handicap: 0 }).then((r) => r.status && { backend: r.status.backendLabel, backendId: r.status.backend })`,
+    );
+    console.log("  CPU 引擎状态:", JSON.stringify(cpuRun));
+    await js(`(function(){ const s = document.getElementById('setBackendMode'); s.value='auto'; s.dispatchEvent(new Event('change')); })()`);
+    await wait(1500);
+    const autoRun = await js(
+      `window.go.newGame({ size: 9, komi: 7, levelId: 'lv8', handicap: 0 }).then((r) => r.status && { backend: r.status.backendLabel, backendId: r.status.backend })`,
+    );
+    console.log("  切回自动:", JSON.stringify(autoRun));
+    if (cpuRun && cpuRun.backendId !== 'cpu') {
+      console.log("  ✗ 切到仅 CPU 后引擎仍在用", cpuRun.backendId);
+      process.exitCode = 1;
+    }
+
+    step("跑分：GPU（120 访问 × 2 局面）");
+    const bench = await js(`window.go.benchmarkRun({ target: 'gpu', visits: 120, positions: 2 })`);
+    console.log(
+      "  跑分结果:",
+      JSON.stringify({ ok: bench.ok, visits: bench.visits, nnEvals: bench.nnEvals, batch: bench.batchSize, threads: bench.threads, reason: bench.reason }),
+    );
+    if (!bench.ok) {
+      console.log("  跑分输出尾部:", String(bench.output ?? "").split("\n").slice(-6).join(" | "));
+      process.exitCode = 1;
+    }
+
+    step("关闭设置面板");
+    await js(`document.getElementById('btnSettingsClose').click()`);
+    await wait(600);
+    const modalClosed = await js(`document.getElementById('settingsModal').classList.contains('hidden')`);
+    console.log("  面板已关闭:", modalClosed);
+
     step("性能模式：切换到省电再切回高吞吐（引擎重启 + 局面恢复）");
     await js(`document.querySelector('.mode-btn[data-mode="play"]').click()`);
     await wait(9000);
@@ -907,6 +1000,8 @@ app.whenReady().then(async () => {
   settings = { ...(await readSettingsFile()) };
   // 没设置过就默认高吞吐（弱机可以在界面里切回省电）
   settings.perfMode = normalizePerfMode(settings.perfMode ?? PERF.PERFORMANCE);
+  settings.backendMode = normalizeBackendMode(settings.backendMode);
+  settings.lang = normalizeLang(settings.lang);
   manager = new EngineManager({
     rootDir: APP_ROOT,
     dataDir: DATA_DIR,
@@ -914,6 +1009,7 @@ app.whenReady().then(async () => {
     threads: 6,
     perfMode: settings.perfMode,
     perfEngines: 1,
+    backendMode: settings.backendMode,
   });
   manager.on('log', (line) => {
     console.log('[engine]', line);
@@ -927,6 +1023,7 @@ app.whenReady().then(async () => {
     engineRoot: ENGINE_ROOT,
     threads: 4,
     perfMode: settings.perfMode,
+    backendMode: settings.backendMode,
   });
   spectate.on('log', (line) => {
     console.log('[spectate]', line);
@@ -949,7 +1046,10 @@ app.whenReady().then(async () => {
   }));
 
   ipcMain.handle('levels:list', () =>
-    LEVELS.map((l) => ({ ...describeLevel(l), isHumanStyle: l.backend === 'human' })),
+    LEVELS.map((l) => ({
+      ...describeLevel(l, normalizeLang(settings.lang)),
+      isHumanStyle: l.backend === 'human',
+    })),
   );
 
   ipcMain.handle('engine:status', () => manager.status());
@@ -1115,16 +1215,41 @@ app.whenReady().then(async () => {
     return {
       perfMode: mode,
       perfLabel: mode === PERF.PERFORMANCE ? '高吞吐' : '省电',
+      backendMode: normalizeBackendMode(settings.backendMode),
+      lang: normalizeLang(settings.lang),
       backendId,
+      backendLabel: manager?.backendLabel ?? null,
+      backendDetail: manager?.backendDetail ?? null,
+      running: Boolean(manager?.engine?.running),
       tune,
       spectateTune,
       cores: os.cpus().length,
+      version: app.getVersion(),
+      uninstaller: uninstallerPath(),
+      engineRoot: ENGINE_ROOT,
     };
+  }
+
+  /** 根目录下的卸载程序（便携版才有；MSI 安装版由系统卸载项负责） */
+  function uninstallerPath() {
+    const names =
+      process.platform === 'win32'
+        ? ['卸载 Komi.exe', 'Uninstall-Komi.exe']
+        : ['uninstall.sh'];
+    for (const dir of [INSTALL_DIR, APP_ROOT]) {
+      for (const n of names) {
+        const p = path.join(dir, n);
+        if (existsSync(p)) return p;
+      }
+    }
+    return null;
   }
 
   ipcMain.handle('settings:get', () => perfSnapshot());
 
   ipcMain.handle('settings:set', async (_e, patch = {}) => {
+    let restarted = false;
+
     if (patch.perfMode !== undefined) {
       if (spectateBusy) {
         return { ok: false, reason: '观战/测速进行中，请先停止再切换性能模式', ...perfSnapshot() };
@@ -1134,16 +1259,217 @@ app.whenReady().then(async () => {
       await writeSettingsFile({ perfMode: mode });
       const a = manager ? await manager.setPerfMode(mode) : { changed: false };
       const b = spectate ? await spectate.setPerfMode(mode) : { changed: false };
-      const restart = Boolean(a.changed || b.changed);
-      if (restart) {
+      restarted = Boolean(a.changed || b.changed) || restarted;
+      if (restarted) {
         send(
           'engine:log',
           `性能模式 → ${mode === PERF.PERFORMANCE ? '高吞吐' : '省电'}（引擎将在下一次落子/分析时自动重启）`,
         );
       }
-      return { ok: true, restarted: restart, ...perfSnapshot() };
     }
-    return { ok: true, ...perfSnapshot() };
+
+    if (patch.backendMode !== undefined) {
+      if (spectateBusy) {
+        return { ok: false, reason: '观战/测速进行中，请先停止再切换计算方式', ...perfSnapshot() };
+      }
+      const mode = normalizeBackendMode(patch.backendMode);
+      settings = { ...settings, backendMode: mode };
+      await writeSettingsFile({ backendMode: mode });
+      const a = manager ? await manager.setBackendMode(mode) : { changed: false };
+      const b = spectate ? await spectate.setBackendMode(mode) : { changed: false };
+      restarted = Boolean(a.changed || b.changed) || restarted;
+      const label = mode === BACKEND_MODE.CPU ? '仅 CPU' : mode === BACKEND_MODE.GPU ? '仅 GPU' : '自动';
+      send('engine:log', `后台计算方式 → ${label}${restarted ? '（下一次思考时自动重启引擎）' : ''}`);
+    }
+
+    if (patch.lang !== undefined) {
+      const lang = normalizeLang(patch.lang);
+      settings = { ...settings, lang };
+      await writeSettingsFile({ lang });
+    }
+
+    return { ok: true, restarted, ...perfSnapshot() };
+  });
+
+  // ---------------------------------------------------------------- 组件状态（设置面板用）
+  ipcMain.handle('components:list', async () => {
+    const hw = await detectHardware();
+    const out = [];
+    for (const c of COMPONENTS) {
+      const installed = await isInstalled(c, ENGINE_ROOT);
+      const ev = evaluateComponent(hw, c);
+      out.push({
+        id: c.id,
+        label: c.label,
+        detail: c.detail,
+        bytes: c.bytes,
+        required: Boolean(c.required),
+        installed,
+        applicable: ev.applicable,
+        recommended: Boolean(ev.recommended) || Boolean(c.required),
+        reason: ev.reason ?? null,
+      });
+    }
+    return { engineRoot: ENGINE_ROOT, components: out, hardware: summarize(hw) };
+  });
+
+  // ---------------------------------------------------------------- 跑分（benchmark）
+  const ENGINE_BIN = process.platform === 'win32' ? 'katago.exe' : 'katago';
+
+  function benchmarkTargets() {
+    const out = [];
+    const gpu = manager?.backends?.find((b) => b.id !== 'cpu');
+    if (gpu) out.push({ id: 'gpu', label: `GPU · ${gpu.label}`, backendId: gpu.id, exe: gpu.exe });
+    const cpu =
+      manager?.backends?.find((b) => b.id === 'cpu') ??
+      { id: 'cpu', label: 'CPU', exe: path.join(ENGINE_ROOT, 'cpu', ENGINE_BIN) };
+    out.push({ id: 'cpu', label: `CPU · ${cpu.label}`, backendId: 'cpu', exe: cpu.exe });
+    return out;
+  }
+
+  ipcMain.handle('benchmark:targets', () =>
+    benchmarkTargets().map(({ id, label, backendId, exe }) => ({ id, label, backendId, available: existsSync(exe) })),
+  );
+
+  ipcMain.handle('benchmark:run', async (_e, { target = 'gpu', visits = 200, positions = 4, threads } = {}) => {
+    if (benchRunning) return { ok: false, reason: '已有跑分在进行中' };
+    const t = benchmarkTargets().find((x) => x.id === target);
+    if (!t) return { ok: false, reason: '未知的跑分目标' };
+    if (!existsSync(t.exe)) return { ok: false, reason: `没找到 ${t.label} 的引擎文件：${t.exe}` };
+
+    const auto = manager && manager.engine?.running ? manager.engine : null;
+    // 跑分期间先停掉正在搜索的引擎，免得两边抢显卡把成绩拉低
+    if (auto) await manager.engine.stop().catch(() => {});
+    if (manager) {
+      manager.engine = null;
+      manager.activeKey = null;
+    }
+
+    benchRunning = true;
+    const t0 = Date.now();
+    try {
+      // 跑分必须用「标准网络」的档位配置：拟人档的 cfg 里有 humanSLProfile，
+      // 配上 b18c384nbt 主网络会直接报错退出，所以固定用 lv8（普通网络档）
+      const { file } = await manager.ensureCfg(levelById('lv8'), t.backendId);
+      const cfgFile = file;
+      const numThreads = threads || (target === 'cpu' ? Math.min(8, os.cpus().length) : manager.tune.numSearchThreads);
+      const args = [
+        'benchmark',
+        '-model',
+        manager.models.main,
+        '-config',
+        cfgFile,
+        '-visits',
+        String(visits),
+        '-n',
+        String(positions),
+        '-t',
+        String(numThreads),
+        '-boardsize',
+        '19',
+      ];
+      const result = await new Promise((resolve, reject) => {
+        const proc = spawn(t.exe, args, { cwd: path.dirname(t.exe), windowsHide: true });
+        let buf = '';
+        let full = '';
+        let lastLine = '';
+        const timer = setTimeout(() => {
+          try {
+            proc.kill();
+          } catch {
+            /* ignore */
+          }
+          reject(new Error(`跑分超时（${target === 'cpu' ? 600 : 240} 秒）`));
+        }, target === 'cpu' ? 600000 : 240000);
+
+        proc.stdout.on('data', (chunk) => {
+          const text = String(chunk);
+          full += text;
+          buf += text;
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
+          for (const line of lines) {
+            const s = line.trim();
+            if (!s) continue;
+            lastLine = s;
+            send('benchmark:progress', { target, line: s });
+          }
+        });
+        proc.stderr.on('data', (chunk) => {
+          const s = String(chunk);
+          full += s;
+          if (/error|warn/i.test(s)) send('benchmark:progress', { target, line: s.trim() });
+        });
+        proc.on('error', (err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+        proc.on('exit', (code) => {
+          clearTimeout(timer);
+          resolve({ code, output: full, lastLine });
+        });
+      });
+
+      const text = `${result.output}\n${result.lastLine}`;
+      // 取最后一次匹配：benchmark 会先跑一轮基线，最后一行才是推荐配置的成绩
+      const lastMatch = (re) => {
+        re.lastIndex = 0;
+        let m = null;
+        let last = null;
+        while ((m = re.exec(text)) !== null) {
+          last = m;
+          if (m.index === re.lastIndex) re.lastIndex += 1;
+        }
+        return last;
+      };
+      const mv = lastMatch(/visits\/s\s*=\s*(-?[\d.]+)/gi);
+      const mn = lastMatch(/nnEvals\/s\s*=\s*(-?[\d.]+)/gi);
+      const mb = lastMatch(/avgBatchSize\s*=\s*(-?[\d.]+)/gi);
+      const visitsPerSec = Number(mv?.[1] ?? NaN);
+      if (result.code !== 0 || !Number.isFinite(visitsPerSec) || visitsPerSec <= 0) {
+        return {
+          ok: false,
+          reason: `跑分失败（退出码 ${result.code}，未解析到 visits/s）`,
+          output: text.slice(-1500),
+        };
+      }
+      return {
+        ok: true,
+        target,
+        label: t.label,
+        backendId: t.backendId,
+        threads: numThreads,
+        visits: visitsPerSec,
+        nnEvals: Number(mn?.[1] ?? 0),
+        batchSize: Number(mb?.[1] ?? 0),
+        elapsedMs: Date.now() - t0,
+        output: text.slice(-1500),
+      };
+    } catch (err) {
+      return { ok: false, reason: err.message };
+    } finally {
+      benchRunning = false;
+    }
+  });
+
+  ipcMain.handle('shell:reveal', async (_e, target) => {
+    const p = target === 'uninstaller' ? uninstallerPath() : target === 'engineRoot' ? ENGINE_ROOT : null;
+    if (!p) return { ok: false, reason: '找不到该路径' };
+    shell.showItemInFolder(p);
+    return { ok: true, path: p };
+  });
+
+  ipcMain.handle('app:openUninstaller', async () => {
+    const p = uninstallerPath();
+    if (!p) {
+      return {
+        ok: false,
+        reason:
+          '当前目录里没有卸载程序。安装版（MSI）请到「设置 → 应用 → Komi」卸载；便携版根目录应有「卸载 Komi.exe」。',
+      };
+    }
+    const err = await shell.openPath(p);
+    return err ? { ok: false, reason: err } : { ok: true, path: p };
   });
 
   ipcMain.handle('setup:check', async () => {

@@ -11,7 +11,7 @@ import { createState, playMove, playPass, placeStones, gtpToIdx, xOf, yOf, BLACK
 const RESIGN = 'resign';
 
 export class SpectateRunner extends EventEmitter {
-  constructor({ rootDir, dataDir, engineRoot, threads = 6, perfMode = 'balanced' } = {}) {
+  constructor({ rootDir, dataDir, engineRoot, threads = 6, perfMode = 'balanced', backendMode = 'auto' } = {}) {
     super();
     this.rootDir = rootDir;
     this.dataDir = dataDir ?? rootDir;
@@ -19,6 +19,7 @@ export class SpectateRunner extends EventEmitter {
     this.threads = threads;
     // 观战同时跑两个引擎，性能模式要按 2 个引擎平分 CPU 核数
     this.perfMode = perfMode;
+    this.backendMode = backendMode;
     this.engines = null;
     this.aborted = false;
     this.paused = false;
@@ -34,6 +35,7 @@ export class SpectateRunner extends EventEmitter {
         threads: this.threads,
         perfMode: this.perfMode,
         perfEngines: 2,
+        backendMode: this.backendMode,
         // 观战由自己维护双方棋盘，不需要引擎管理器记录历史
         trackHistory: false,
       });
@@ -42,6 +44,14 @@ export class SpectateRunner extends EventEmitter {
     };
     this.engines = { A: make('A'), B: make('B') };
     return this.engines;
+  }
+
+  /** 切换后台计算方式（auto / gpu / cpu） */
+  async setBackendMode(mode) {
+    this.backendMode = mode;
+    if (!this.engines) return { changed: true, restarted: false };
+    for (const mgr of Object.values(this.engines)) await mgr.setBackendMode(mode).catch(() => {});
+    return { changed: true, restarted: true };
   }
 
   /** 切换性能模式（本轮对局结束后生效：两个引擎都会重启） */
