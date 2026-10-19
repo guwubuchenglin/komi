@@ -333,6 +333,49 @@ async function runUiFeatureTest(target) {
     await wait(13000);
     console.log("启动状态:", JSON.stringify(await state()));
 
+    step("手数标记：棋子上的手数必须固定不变");
+    await js(`(function(){
+      const s = document.getElementById('sizeSelect'); s.value='9'; s.dispatchEvent(new Event('change'));
+    })()`);
+    await wait(9000);
+    await js(`(function(){
+      document.getElementById('handicapSelect').value = '0';
+      document.getElementById('chkNumbers').checked = true;
+      document.getElementById('chkNumbers').dispatchEvent(new Event('change'));
+    })()`);
+    await wait(4000);
+    // 人执黑：先下 (2,2)，等 AI 应手
+    const clickAt = (gx, gy) => js(`(function(){
+      const cv = document.getElementById('board');
+      const rect = cv.getBoundingClientRect();
+      const side = parseFloat(cv.style.width);
+      const n = Number(document.getElementById('sizeSelect').value);
+      const margin = Math.round(side * 0.055);
+      const cell = (side - margin * 2) / (n - 1);
+      const x = rect.left + margin + ${gx} * cell;
+      const y = rect.top + margin + ${gy} * cell;
+      cv.dispatchEvent(new MouseEvent('mousemove', { clientX: x, clientY: y, bubbles: true }));
+      cv.dispatchEvent(new MouseEvent('click', { clientX: x, clientY: y, bubbles: true }));
+      return true;
+    })()`);
+    await clickAt(2, 2);
+    await wait(9000);
+    const num1 = await js(`window.__moveNumberAt(2, 2)`);
+    await clickAt(4, 4);
+    await wait(9000);
+    const num2 = await js(`window.__moveNumberAt(2, 2)`);
+    const num3 = await js(`window.__moveNumberAt(4, 4)`);
+    const moves = await js(`window.__state().moveNumber`);
+    console.log("  第一手(2,2) 的手数:", num1, "→ 又走了几手后:", num2, " 自己的第二手(4,4):", num3, " 总手数:", moves);
+    if (num1 !== 1 || num2 !== 1) {
+      console.log("  ✗ 手数标记会变（应为 1 → 1）");
+      process.exitCode = 1;
+    }
+    if (num3 == null || num3 === 1) {
+      console.log("  ✗ 后落的子手数不正确:", num3);
+      process.exitCode = 1;
+    }
+
     step("让子棋：9 路 + 让 2 子");
     await js(`(function(){
       const s = document.getElementById('sizeSelect'); s.value='9'; s.dispatchEvent(new Event('change'));

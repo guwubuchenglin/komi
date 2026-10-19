@@ -1,4 +1,4 @@
-﻿/* 围棋 · 内置 KataGo —— 渲染进程主逻辑（经典脚本，依赖 rules.global.js） */
+/* 围棋 · 内置 KataGo —— 渲染进程主逻辑（经典脚本，依赖 rules.global.js） */
 (function () {
   "use strict";
 
@@ -208,11 +208,13 @@
     el("btnOpenSgf").addEventListener("click", () => onOpenSgf());
     window.__openSgf = onOpenSgf; // 测试钩子
     window.__saveSgf = onSaveSgf;
+    // 测试钩子：查询某个点上的棋子显示的手数
+    window.__moveNumberAt = (x, y) =>
+      S.game ? moveNumberAt(R.idxOf(x, y, S.size)) : null;
     window.__state = () => ({
       mode: S.mode,
       size: S.size,
-      komi: S.komi,
-      blacks: S.game ? [...S.game.board].filter((v) => v === 1).length : 0,
+      komi: S.komi,      blacks: S.game ? [...S.game.board].filter((v) => v === 1).length : 0,
       whites: S.game ? [...S.game.board].filter((v) => v === 2).length : 0,
       stones: S.game ? [...S.game.board].filter((v) => v !== 0).length : 0,
       moveNumber: S.game?.moveNumber ?? 0,
@@ -1096,13 +1098,22 @@
     ctx.stroke();
   }
 
+  /**
+   * 某个点上的棋子是第几手下的（只数真实落子，停一手不算）。
+   * 之前返回的是「距离最新一手的步数」，于是每走一手，所有棋子上的数字都会跟着变。
+   */
   function moveNumberAt(idx) {
     const h = S.game.history;
-    for (let i = h.length - 1, n = h.length; i >= 0; i--) {
+    let count = 0;
+    let found = 0;
+    for (let i = 0; i < h.length; i++) {
       const m = h[i];
-      if (m.type === "move" && R.idxOf(m.x, m.y, S.size) === idx) return n - i;
+      if (m.type !== "move") continue;
+      count += 1;
+      // 同一点可能被提掉后重下，最后一次落在该点的就是当前这颗子
+      if (R.idxOf(m.x, m.y, S.size) === idx) found = count;
     }
-    return null;
+    return found > 0 ? found : null;
   }
 
   function starPoints(n) {
