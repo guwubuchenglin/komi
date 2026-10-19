@@ -164,6 +164,27 @@ export class EngineManager extends EventEmitter {
     return { file, key: baseKey };
   }
 
+  /** 跑分专用配置：与当前档位、性能模式、计算方式都无关，固定按最大化参数生成 */
+  async ensureBenchCfg(backendId, tune) {
+    await mkdir(this.cfgDir, { recursive: true });
+    const backend = this.backends.find((b) => b.id === backendId);
+    const content =
+      [
+        ...generateCfg(levelById('lv8'), {
+          threads: tune.numSearchThreads,
+          perfMode: PERF.PERFORMANCE,
+          perfEngines: 1,
+          backendId,
+          tune,
+        }),
+        ...(backend?.params ?? []),
+      ].join('\n') + '\n';
+    const hash = createHash('sha1').update(content).digest('hex').slice(0, 8);
+    const file = path.join(this.cfgDir, `bench_${backendId}-${hash}.cfg`);
+    if (!existsSync(file)) await writeFile(file, content, 'utf8');
+    return { file, tune, params: backend?.params ?? [] };
+  }
+
   /** 读取上次成功使用的后端（config/engine.json） */
   async loadCachedBackend() {
     try {

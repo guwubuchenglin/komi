@@ -44,6 +44,34 @@ export function normalizeLang(lang) {
 }
 
 /**
+ * 跑分专用配置：**与用户当前设置完全无关**。
+ * 跑分要回答的是「这台机器最多能跑多快」，所以固定用最能吃满显卡的参数：
+ * 线程拉满（上限 32）、批次放大、CUDA 再开 2 个 NN server 线程。
+ * 不读 perfMode，也不读用户的档位与观战/单引擎设置。
+ */
+export function benchmarkTuning({ backendId = null, cores = os.cpus().length, target = 'gpu' } = {}) {
+  const c = Math.max(2, cores || 2);
+  if (target === 'cpu') {
+    // CPU 版 KataGo 用 Eigen，线程超过物理核数只会互相拖慢
+    return {
+      mode: PERF.PERFORMANCE,
+      numSearchThreads: Math.max(1, Math.min(16, c)),
+      nnMaxBatchSize: 8,
+      numNNServerThreadsPerModel: 1,
+    };
+  }
+  const threads = Math.max(4, Math.min(32, c));
+  const cuda = backendId === 'cuda';
+  return {
+    mode: PERF.PERFORMANCE,
+    numSearchThreads: threads,
+    // 批次按线程数的两倍给（KataGo 会和实际等待数取小），CUDA 上限 64
+    nnMaxBatchSize: cuda ? Math.max(24, Math.min(64, threads * 2)) : 16,
+    numNNServerThreadsPerModel: cuda ? 2 : 1,
+  };
+}
+
+/**
  * 计算搜索线程 / 批次大小 / NN server 线程数。
  * @param {object} o
  * @param {'balanced'|'performance'} [o.mode]
@@ -205,8 +233,7 @@ export const LEVELS = [
 
 export const DEFAULT_LEVEL_ID = "lv4";
 
-/** 英文界面用的档位名（中文名保留在 label / rank 里） */
-const EN_LEVELS = {
+/** 英文界面用的档位名（中文名保留在 label / rank 里） */const EN_LEVELS = {
   lv1: { label: "Beginner", rank: "~20 kyu" },
   lv2: { label: "Novice", rank: "~15 kyu" },
   lv3: { label: "Elementary", rank: "~10 kyu" },
@@ -253,9 +280,11 @@ export function generateCfg(
     perfMode = PERF.BALANCED,
     perfEngines = 1,
     backendId = null,
+    // 直接指定调参（跑分用），给了就不再按 perfMode 推导
+    tune: tuneOverride = null,
   } = {},
 ) {
-  const tune = tuningFor({ mode: perfMode, threads, engines: perfEngines, backendId });
+  const tune = tuneOverride ?? tuningFor({ mode: perfMode, threads, engines: perfEngines, backendId });
   // 用对象累积，同一键后写覆盖先写，避免 KataGo 因重复键拒绝启动
   const cfg = {
     logDir: "gtp_logs",

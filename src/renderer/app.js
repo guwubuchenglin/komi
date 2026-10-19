@@ -1421,11 +1421,17 @@
         log(`跑分失败（${BENCH_LABEL[target]}）：${res.reason}`);
         return;
       }
+      const cfgInfo = res.tune
+        ? ` · ${res.threads} ${isEn() ? "threads" : "线程"} / batch ${res.tune.nnMaxBatchSize} / NN×${res.tune.numNNServerThreadsPerModel}`
+        : ` · ${res.threads}${isEn() ? " threads" : " 线程"}`;
       el("benchStatus").textContent =
         `✓ ${BENCH_LABEL[target]} · ${res.visits.toFixed(0)} visits/s · ` +
-        `${res.nnEvals.toFixed(0)} nnEvals/s · batch ${res.batchSize.toFixed(1)} · ` +
-        `${res.threads}${isEn() ? " threads" : " 线程"} · ${(res.elapsedMs / 1000).toFixed(1)}s`;
-      log(`跑分 ${BENCH_LABEL[target]}：${res.visits.toFixed(0)} visits/s（${res.nnEvals.toFixed(0)} nnEvals/s）`);
+        `${res.nnEvals.toFixed(0)} nnEvals/s · batch ${res.batchSize.toFixed(1)}` +
+        `${cfgInfo} · ${(res.elapsedMs / 1000).toFixed(1)}s`;
+      log(
+        `跑分 ${BENCH_LABEL[target]}：${res.visits.toFixed(0)} visits/s（${res.nnEvals.toFixed(0)} nnEvals/s，` +
+          `${res.threads} 线程 / batch ${res.tune?.nnMaxBatchSize ?? "?"}）`,
+      );
     } catch (err) {
       el("benchStatus").textContent = `✗ ${BENCH_LABEL[target]}: ${err.message}`;
     } finally {

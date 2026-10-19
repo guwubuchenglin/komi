@@ -17,6 +17,7 @@ import {
   levelById,
   describeLevel,
   tuningFor,
+  benchmarkTuning,
   normalizePerfMode,
   normalizeBackendMode,
   normalizeLang,
@@ -558,16 +559,31 @@ async function runUiFeatureTest(target) {
       process.exitCode = 1;
     }
 
-    step("跑分：GPU（120 访问 × 2 局面）");
+    step("跑分：GPU（与当前设置无关，固定最吃显卡）");
+    // 先把性能模式切成省电，验证跑分不会跟着变弱
+    await js(`window.go.setSettings({ perfMode: 'balanced' })`);
+    await wait(900);
     const bench = await js(`window.go.benchmarkRun({ target: 'gpu', visits: 120, positions: 2 })`);
     console.log(
       "  跑分结果:",
-      JSON.stringify({ ok: bench.ok, visits: bench.visits, nnEvals: bench.nnEvals, batch: bench.batchSize, threads: bench.threads, reason: bench.reason }),
+      JSON.stringify({
+        ok: bench.ok,
+        visits: bench.visits,
+        nnEvals: bench.nnEvals,
+        batch: bench.batchSize,
+        threads: bench.threads,
+        tune: bench.tune,
+        reason: bench.reason,
+      }),
     );
     if (!bench.ok) {
       console.log("  跑分输出尾部:", String(bench.output ?? "").split("\n").slice(-6).join(" | "));
       process.exitCode = 1;
+    } else if (bench.tune && bench.threads < 16) {
+      console.log(`  ✗ 省电模式下跑分被压低（${bench.threads} 线程），应与设置无关`);
+      process.exitCode = 1;
     }
+    await js(`window.go.setSettings({ perfMode: 'performance' })`);
 
     step("关闭设置面板");
     await js(`document.getElementById('btnSettingsClose').click()`);
@@ -1331,13 +1347,14 @@ app.whenReady().then(async () => {
     benchmarkTargets().map(({ id, label, backendId, exe }) => ({ id, label, backendId, available: existsSync(exe) })),
   );
 
-  ipcMain.handle('benchmark:run', async (_e, { target = 'gpu', visits = 200, positions = 4, threads } = {}) => {
+  ipcMain.handle('benchmark:run', async (_e, { target = 'gpu', visits = 200, positions = 4 } = {}) => {
     if (benchRunning) return { ok: false, reason: '已有跑分在进行中' };
     const t = benchmarkTargets().find((x) => x.id === target);
     if (!t) return { ok: false, reason: '未知的跑分目标' };
     if (!existsSync(t.exe)) return { ok: false, reason: `没找到 ${t.label} 的引擎文件：${t.exe}` };
 
     const auto = manager && manager.engine?.running ? manager.engine : null;
+    const wasRunning = Boolean(auto);
     // 跑分期间先停掉正在搜索的引擎，免得两边抢显卡把成绩拉低
     if (auto) await manager.engine.stop().catch(() => {});
     if (manager) {
@@ -1348,11 +1365,11 @@ app.whenReady().then(async () => {
     benchRunning = true;
     const t0 = Date.now();
     try {
-      // 跑分必须用「标准网络」的档位配置：拟人档的 cfg 里有 humanSLProfile，
-      // 配上 b18c384nbt 主网络会直接报错退出，所以固定用 lv8（普通网络档）
-      const { file } = await manager.ensureCfg(levelById('lv8'), t.backendId);
-      const cfgFile = file;
-      const numThreads = threads || (target === 'cpu' ? Math.min(8, os.cpus().length) : manager.tune.numSearchThreads);
+      // 跑分配置完全独立于用户设置：不读性能模式、不读档位、不读「仅 CPU / 仅 GPU」，
+      // 固定用最能吃满硬件的参数（线程拉满、批次放大、CUDA 双 NN server 线程）
+      const tune = benchmarkTuning({ backendId: t.backendId, target, cores: os.cpus().length });
+      const { file: cfgFile } = await manager.ensureBenchCfg(t.backendId, tune);
+      const numThreads = tune.numSearchThreads;
       const args = [
         'benchmark',
         '-model',
@@ -1439,6 +1456,7 @@ app.whenReady().then(async () => {
         label: t.label,
         backendId: t.backendId,
         threads: numThreads,
+        tune,
         visits: visitsPerSec,
         nnEvals: Number(mn?.[1] ?? 0),
         batchSize: Number(mb?.[1] ?? 0),
@@ -1449,6 +1467,8 @@ app.whenReady().then(async () => {
       return { ok: false, reason: err.message };
     } finally {
       benchRunning = false;
+      // 跑完把引擎按用户原本的设置重新拉起来（跑分不改变任何设置）
+      if (wasRunning) manager?.ensureEngine().catch(() => {});
     }
   });
 
