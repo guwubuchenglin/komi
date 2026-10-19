@@ -1,4 +1,4 @@
-/* 围棋 · 内置 KataGo —— 渲染进程主逻辑（经典脚本，依赖 rules.global.js） */
+﻿/* 围棋 · 内置 KataGo —— 渲染进程主逻辑（经典脚本，依赖 rules.global.js） */
 (function () {
   "use strict";
 
@@ -148,7 +148,7 @@
     });
 
     // AI 观战的双方难度下拉
-    for (const id of ["specBlack", "specWhite"]) {
+    for (const id of ["specBlack", "specWhite", "benchLevel"]) {
       const sel = el(id);
       sel.innerHTML = "";
       for (const lv of levels) {
@@ -160,6 +160,7 @@
     }
     el("specBlack").value = "lv3";
     el("specWhite").value = "lv5";
+    el("benchLevel").value = "lv8";
 
     // 观战速度：选预设会自动填好「每手访问 / 落子间隔」，手动改动则转为「自定义」
     el("specSpeed").addEventListener("change", () => applySpectateSpeed(el("specSpeed").value));
@@ -186,8 +187,9 @@
     api.onBenchStarted((info) => {
       el("benchHint").textContent =
         `${info.backendLabel ?? info.backendId} · ${info.threads} 线程 / batch ${info.batch} / NN×${info.nnServer}` +
-        ` · 每手连续搜索 ${info.timeSec}s（满载）`;
-      log(`跑分引擎就绪：${info.backendLabel ?? info.backendId}（${info.threads} 线程 / batch ${info.batch}）`);
+        ` · 每手连续搜索 ${info.timeSec}s（满载）` +
+        (info.levelLabel ? ` · 难度 ${info.levelLabel}` : "");
+      log(`压测引擎就绪：${info.backendLabel ?? info.backendId}（${info.threads} 线程 / batch ${info.batch}）`);
       S.bench.running = true;
       updateButtons();
     });
@@ -197,7 +199,7 @@
     api.onBenchError((e) => {
       S.bench.running = false;
       updateButtons();
-      log("跑分失败：" + (e?.message ?? "未知错误"));
+      log("压测失败：" + (e?.message ?? "未知错误"));
       el("benchMoveText").textContent = "失败";
     });
     if (api.onBenchLog) api.onBenchLog((line) => log(line));
@@ -1452,7 +1454,7 @@
       const res = await api.benchmarkRun({ target });
       if (!res.ok) {
         el("benchStatus").textContent = `✗ ${BENCH_LABEL[target]}: ${res.reason}`;
-        log(`跑分失败（${BENCH_LABEL[target]}）：${res.reason}`);
+        log(`快速测速失败（${BENCH_LABEL[target]}）：${res.reason}`);
         return;
       }
       const cfgInfo = res.tune
@@ -1463,7 +1465,7 @@
         `${res.nnEvals.toFixed(0)} nnEvals/s · batch ${res.batchSize.toFixed(1)}` +
         `${cfgInfo} · ${(res.elapsedMs / 1000).toFixed(1)}s`;
       log(
-        `跑分 ${BENCH_LABEL[target]}：${res.visits.toFixed(0)} visits/s（${res.nnEvals.toFixed(0)} nnEvals/s，` +
+        `快速测速 ${BENCH_LABEL[target]}：${res.visits.toFixed(0)} visits/s（${res.nnEvals.toFixed(0)} nnEvals/s，` +
           `${res.threads} 线程 / batch ${res.tune?.nnMaxBatchSize ?? "?"}）`,
       );
     } catch (err) {
@@ -1487,8 +1489,9 @@
         levelSelect: S.levelId,
         specBlack: el("specBlack").value,
         specWhite: el("specWhite").value,
+        benchLevel: el("benchLevel").value,
       };
-      for (const id of ["levelSelect", "specBlack", "specWhite"]) {
+      for (const id of ["levelSelect", "specBlack", "specWhite", "benchLevel"]) {
         const selEl = el(id);
         selEl.innerHTML = "";
         for (const lv of levels) {
@@ -2014,22 +2017,25 @@
       size: S.size,
       komi: S.komi,
       games: Number(el("benchGames").value) || 1,
+      levelId: el("benchLevel").value || "lv8",
     };
     S.bench.running = true;
     updateButtons();
     el("benchMoveText").textContent = `0 / ${opts.games} 局`;
-    log(`开始跑分：${opts.target.toUpperCase()} · ${opts.size} 路 · ${opts.games} 局（满载参数）`);
+    log(
+      `开始压测：${opts.target.toUpperCase()} · ${opts.size} 路 · ${opts.games} 局 · 难度 ${levelLabel(opts.levelId)}（满载参数）`,
+    );
     try {
       const res = await api.benchStart(opts);
       if (!res.started) {
         S.bench.running = false;
         updateButtons();
-        log("无法开始跑分：" + (res.reason ?? "未知原因"));
+        log("无法开始压测：" + (res.reason ?? "未知原因"));
       }
     } catch (err) {
       S.bench.running = false;
       updateButtons();
-      log("跑分启动失败：" + err.message);
+      log("压测启动失败：" + err.message);
     }
   }
 
@@ -2091,7 +2097,7 @@
   function onBenchDone(r) {
     S.bench.running = false;
     updateButtons();
-    const head = r.aborted ? "跑分已停止" : "跑分完成";
+    const head = r.aborted ? "压测已停止" : "压测完成";
     const gameLines = (r.gameResults ?? [])
       .map(
         (g) =>

@@ -592,7 +592,7 @@ async function runUiFeatureTest(target) {
     const modalClosed = await js(`document.getElementById('settingsModal').classList.contains('hidden')`);
     console.log("  面板已关闭:", modalClosed);
 
-    step("跑分模式：完整对局，一盘算一局（GPU，测试用低访问提速）");
+    step("压测模式：完整对局，一盘算一局（GPU，测试用短时长提速）");
     await js(`document.querySelector('.mode-btn[data-mode="bench"]').click()`);
     await wait(1200);
     await js(`(function(){
@@ -601,6 +601,7 @@ async function runUiFeatureTest(target) {
       s.value = '9';
       s.dispatchEvent(new Event('change'));
       document.getElementById('benchGames').value = '1';
+      document.getElementById('benchLevel').value = 'lv8';
     })()`);
     await wait(800);
     process.env.GO_BENCH_TIME = '0.08';
@@ -637,11 +638,12 @@ async function runUiFeatureTest(target) {
     await js(`document.getElementById('btnResultClose').click()`);
     await wait(600);
 
-    step("跑分模式：CPU 目标（同样跑完整对局，但慢得多）");
+    step("压测模式：CPU 目标 + 选难度（拟人档，验证难度生效）");
     const tCpu = Date.now();
     await js(`(function(){
       document.getElementById('benchTarget').value = 'cpu';
       document.getElementById('benchGames').value = '1';
+      document.getElementById('benchLevel').value = 'lv5';
     })()`);
     process.env.GO_BENCH_TIME = '0.15';
     await js(`document.getElementById('btnBenchStart').click()`);
@@ -1569,6 +1571,7 @@ app.whenReady().then(async () => {
     const size = Number(opts.size ?? 19);
     const komi = Number(opts.komi ?? 7.5);
     const games = Math.max(1, Math.min(20, Number(opts.games ?? 1)));
+    const level = levelById(String(opts.levelId ?? 'lv8'));
     const budget = benchBudgetFor(target);
     const safetyCap = size <= 9 ? 200 : size <= 13 ? 300 : 450;
 
@@ -1590,7 +1593,7 @@ app.whenReady().then(async () => {
     });
     mgr.on('log', (line) => send('bench:log', line));
 
-    benchRun = { mgr, aborted: false, target, backendId, size, budget, games, tune };
+    benchRun = { mgr, aborted: false, target, backendId, size, budget, games, tune, levelId: level.id };
 
     (async () => {
       let totalMoves = 0;
@@ -1606,16 +1609,25 @@ app.whenReady().then(async () => {
         await spectate?.shutdown().catch(() => {});
         send('bench:log', '已暂停常驻引擎，跑分独占硬件');
 
-        await mgr.setLevel('lv8');
+        await mgr.setLevel(level.id);
+        // 拟人档会带延迟，压测要关掉，否则测到的是"等"而不是算
+        mgr.setFast(true);
         const e = await mgr.ensureEngine();
         // 固定时长搜索：每手连续算满 budget 秒，中间没有空档，显卡持续满载
-        await e.command(`kata-set-param maxVisits ${budget.visitsCap}`, 20000).catch(() => {});
-        await e.command(`kata-set-param maxTime ${budget.timeSec.toFixed(2)}`, 20000).catch(() => {});
+        const applyBudget = async () => {
+          await e.command(`kata-set-param maxVisits ${budget.visitsCap}`, 20000).catch(() => {});
+          await e.command(`kata-set-param maxTime ${budget.timeSec.toFixed(2)}`, 20000).catch(() => {});
+          // maxTime 生效需要 lagBuffer 别太大
+          await e.command('kata-set-param lagBuffer 0.5', 20000).catch(() => {});
+        };
+        await applyBudget();
 
         send('bench:started', {
           target,
           backendId,
           backendLabel: mgr.backendLabel ?? backendId,
+          levelId: level.id,
+          levelLabel: level.label,
           threads: tune.numSearchThreads,
           batch: tune.nnMaxBatchSize,
           nnServer: tune.numNNServerThreadsPerModel,
@@ -1625,7 +1637,9 @@ app.whenReady().then(async () => {
         });
 
         for (let g = 1; g <= games && !benchRun?.aborted; g++) {
-          await mgr.newGame({ size, komi, levelId: 'lv8' });
+          await mgr.newGame({ size, komi, levelId: level.id });
+          // newGame 会按档位重置 maxVisits/maxTime，这里再压回满载预算
+          await applyBudget();
           const gameStart = Date.now();
           let gameMoves = 0;
           let gameMs = 0;
@@ -1745,7 +1759,7 @@ app.whenReady().then(async () => {
       }
     })();
 
-    return { started: true, target, backendId, tune, budget, games };
+    return { started: true, target, backendId, tune, budget, games, levelId: level.id };
   });
 
   ipcMain.handle('bench:stop', async () => {
