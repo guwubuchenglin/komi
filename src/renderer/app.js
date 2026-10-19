@@ -186,12 +186,13 @@
     api.onBenchStarted((info) => {
       el("benchHint").textContent =
         `${info.backendLabel ?? info.backendId} · ${info.threads} 线程 / batch ${info.batch} / NN×${info.nnServer}` +
-        ` · 每手 ${info.visits} 访问`;
+        ` · 每手连续搜索 ${info.timeSec}s（满载）`;
       log(`跑分引擎就绪：${info.backendLabel ?? info.backendId}（${info.threads} 线程 / batch ${info.batch}）`);
       S.bench.running = true;
       updateButtons();
     });
     api.onBenchMove((ev) => onBenchMoveEvent(ev));
+    if (api.onBenchGameEnd) api.onBenchGameEnd((r) => onBenchGameEnd(r));
     api.onBenchDone((r) => onBenchDone(r));
     api.onBenchError((e) => {
       S.bench.running = false;
@@ -2012,15 +2013,12 @@
       target: el("benchTarget").value === "cpu" ? "cpu" : "gpu",
       size: S.size,
       komi: S.komi,
-      maxMoves: Number(el("benchMaxMoves").value) || 80,
-      visits: Number(el("benchVisits").value) || 200,
+      games: Number(el("benchGames").value) || 1,
     };
     S.bench.running = true;
     updateButtons();
-    el("benchMoveText").textContent = `0 / ${opts.maxMoves}`;
-    log(
-      `开始跑分：${opts.target.toUpperCase()} · ${opts.size} 路 · 每手 ${opts.visits} 访问 · ${opts.maxMoves} 手`,
-    );
+    el("benchMoveText").textContent = `0 / ${opts.games} 局`;
+    log(`开始跑分：${opts.target.toUpperCase()} · ${opts.size} 路 · ${opts.games} 局（满载参数）`);
     try {
       const res = await api.benchStart(opts);
       if (!res.started) {
@@ -2061,26 +2059,56 @@
     }
     S.bench.best = ev.bestRate ?? S.bench.best;
     el("benchRateText").textContent =
-      typeof ev.rate === "number" ? `${ev.rate.toFixed(0)} visits/s` : `—（树复用，${ev.elapsedMs}ms）`;
-    el("benchAvgText").textContent = `${ev.avgRate.toFixed(0)} visits/s（最快 ${S.bench.best.toFixed(0)}）`;
-    el("benchMoveText").textContent = `${ev.moveNumber} / ${ev.maxMoves} · ${ev.elapsedMs}ms`;
+      typeof ev.rate === "number" ? `${ev.rate.toFixed(0)} visits/s` : `—（${ev.elapsedMs}ms）`;
+    el("benchAvgText").textContent =
+      `${ev.avgRate.toFixed(0)} visits/s（本局 ${(ev.gameAvgRate ?? 0).toFixed(0)} · 最快 ${S.bench.best.toFixed(0)}）`;
+    el("benchMoveText").textContent = `${ev.game} / ${ev.games} 局 · 本局 ${ev.moveNumber} 手`;
     draw();
     renderStats();
     updateButtons();
+  }
+
+  /** 一局结束：清盘准备下一局 */
+  function onBenchGameEnd(r) {
+    const who =
+      r.winner === "B" ? (isEn() ? "Black" : "黑") : r.winner === "W" ? (isEn() ? "White" : "白") : isEn() ? "draw" : "无胜负";
+    const why =
+      r.reason === "resign"
+        ? isEn() ? "resign" : "认输"
+        : r.reason === "score"
+          ? isEn() ? "counted" : "数子"
+          : isEn() ? "cap" : "上限";
+    log(`第 ${r.game}/${r.games} 局结束：${r.moves} 手 · ${who}（${why}） · ${r.avgRate.toFixed(0)} visits/s`);
+    S.game = R.createState(S.size, { komi: S.komi });
+    S.winrateHist = [];
+    S.lastAiMove = null;
+    S.candidates = [];
+    draw();
+    renderStats();
+    renderCandidates();
   }
 
   function onBenchDone(r) {
     S.bench.running = false;
     updateButtons();
     const head = r.aborted ? "跑分已停止" : "跑分完成";
+    const gameLines = (r.gameResults ?? [])
+      .map(
+        (g) =>
+          `第 ${g.game} 局：${g.moves} 手 · ${
+            g.winner === "B" ? "黑" : g.winner === "W" ? "白" : "无胜负"
+          }（${g.reason === "resign" ? "认输" : g.reason === "score" ? "数子" : "上限"}） · ${g.avgRate.toFixed(0)} visits/s`,
+      )
+      .join("\n");
     const detail =
-      `${r.backendLabel ?? r.target} · ${r.threads} 线程 / batch ${r.batch}\n` +
-      `走了 ${r.moves} 手（上限 ${r.maxMoves}），每手 ${r.visits} 访问\n` +
+      `${r.backendLabel ?? r.target} · ${r.threads} 线程 / batch ${r.batch} · 每手连续搜索 ${r.timeSec}s\n` +
+      `完成 ${r.games}/${r.askedGames} 局，共 ${r.moves} 手 · ${r.visits} 次访问\n` +
       `平均 ${r.avgRate.toFixed(0)} visits/s　最快 ${r.bestRate.toFixed(0)} visits/s\n` +
-      `总耗时 ${(r.elapsedMs / 1000).toFixed(1)}s`;
+      `总耗时 ${(r.elapsedMs / 1000).toFixed(1)}s` +
+      (gameLines ? `\n\n${gameLines}` : "");
     el("benchAvgText").textContent = `${r.avgRate.toFixed(0)} visits/s（最快 ${r.bestRate.toFixed(0)}）`;
-    el("benchMoveText").textContent = `${r.moves} / ${r.maxMoves}`;
-    log(`${head}：${r.avgRate.toFixed(0)} visits/s（最快 ${r.bestRate.toFixed(0)}）`);
+    el("benchMoveText").textContent = `${r.games} / ${r.askedGames} 局 · ${r.moves} 手`;
+    log(`${head}：${r.games} 局 ${r.moves} 手 · 平均 ${r.avgRate.toFixed(0)} visits/s`);
     modal(head, detail);
   }
 

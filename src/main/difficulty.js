@@ -60,13 +60,13 @@ export function benchmarkTuning({ backendId = null, cores = os.cpus().length, ta
       numNNServerThreadsPerModel: 1,
     };
   }
-  const threads = Math.max(4, Math.min(32, c));
+  // 极限压榨：线程给到核数的两倍（上限 48），批次跟着放大，让显卡尽量没有空闲
+  const threads = Math.max(8, Math.min(48, c * 2));
   const cuda = backendId === 'cuda';
   return {
     mode: PERF.PERFORMANCE,
     numSearchThreads: threads,
-    // 批次按线程数的两倍给（KataGo 会和实际等待数取小），CUDA 上限 64
-    nnMaxBatchSize: cuda ? Math.max(24, Math.min(64, threads * 2)) : 16,
+    nnMaxBatchSize: cuda ? Math.max(32, Math.min(96, threads * 2)) : 32,
     numNNServerThreadsPerModel: cuda ? 2 : 1,
   };
 }
@@ -353,8 +353,10 @@ export function generateCfg(
     Object.assign(cfg, {
       maxVisits: level.maxVisits,
       numSearchThreads: tune.numSearchThreads,
-      ponderingEnabled: "false",
-      maxTimePondering: "30.0",
+      // 跑分（tuneOverride）时打开 pondering：两次 genmove 之间引擎继续搜索，
+      // 显卡没有空档，才是真正的「极限压榨」
+      ponderingEnabled: tuneOverride ? "true" : "false",
+      maxTimePondering: tuneOverride ? "10.0" : "30.0",
       lagBuffer: "1.0",
       chosenMoveTemperatureEarly: "0.3",
       chosenMoveTemperature: "0.05",

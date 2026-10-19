@@ -217,14 +217,11 @@
               </label>
             </div>
             <div class="field-row">
-              <label><span data-i18n="bench.maxMoves">手数</span>
-                <input id="benchMaxMoves" type="number" value="80" min="4" max="400" />
-              </label>
-              <label><span data-i18n="bench.visits">每手访问</span>
-                <input id="benchVisits" type="number" value="200" min="10" max="4000" />
+              <label><span data-i18n="bench.games">局数</span>
+                <input id="benchGames" type="number" value="1" min="1" max="20" />
               </label>
             </div>
-            <div class="hint" id="benchHint" data-i18n="bench.idle">跑分固定用最吃硬件的参数（与顶栏设置无关），棋盘会跟着引擎出招飞快变化</div>
+            <div class="hint" id="benchHint" data-i18n="bench.idle">跑分按极限压榨的满载参数跑完整对局（一盘算一局），棋盘会跟着引擎出招飞快变化</div>
             <div class="stat-row"><span data-i18n="bench.rate">当前手速度</span><strong id="benchRateText">—</strong></div>
             <div class="stat-row"><span data-i18n="bench.avg">平均速度</span><strong id="benchAvgText">—</strong></div>
             <div class="stat-row"><span data-i18n="bench.progress">进度</span><strong id="benchMoveText">—</strong></div>

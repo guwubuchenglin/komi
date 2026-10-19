@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('go', {
   benchStatus: () => ipcRenderer.invoke('bench:status'),
   onBenchStarted: on('bench:started'),
   onBenchMove: on('bench:move'),
+  onBenchGameEnd: on('bench:gameEnd'),
   onBenchDone: on('bench:done'),
   onBenchError: on('bench:error'),
   onBenchLog: on('bench:log'),
