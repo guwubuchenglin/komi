@@ -76,6 +76,8 @@ export class EngineManager extends EventEmitter {
     perfEngines = 1,
     trackHistory = true,
     backendMode = 'auto',
+    // 指定调参（跑分用）：给了就完全覆盖按 perfMode 推导出来的线程/批次
+    tuneOverride = null,
   }) {
     super();
     this.rootDir = rootDir;
@@ -86,7 +88,8 @@ export class EngineManager extends EventEmitter {
     this.trackHistory = trackHistory;
     // 后台计算方式：auto = 有 GPU 就用 GPU；gpu = 只用 GPU；cpu = 只用 CPU
     this.backendMode = normalizeBackendMode(backendMode);
-    this.tune = tuningFor({ mode: this.perfMode, threads, engines: this.perfEngines });
+    this.tuneOverride = tuneOverride ?? null;
+    this.tune = this.tuneOverride ?? tuningFor({ mode: this.perfMode, threads, engines: this.perfEngines });
     // engine 目录可能是随包内置的（离线版），也可能是首次运行下载到用户目录的（精简安装）
     this.engineDir = engineRoot ?? path.join(rootDir, 'engine');
     this.cfgDir = path.join(this.dataDir, 'config', 'generated');
@@ -132,18 +135,27 @@ export class EngineManager extends EventEmitter {
     throw new Error('找不到 katago 可执行文件，请检查 engine 目录');
   }
 
+  /** 跑分调参带来的配置指纹后缀（两种 key 必须一致，否则每手都会重启引擎） */
+  _benchSuffix() {
+    return this.tuneOverride
+      ? `-bench${this.tuneOverride.numSearchThreads}x${this.tuneOverride.nnMaxBatchSize}`
+      : '';
+  }
+
   /** 生成（或复用）某档位的配置文件，返回路径 */
   async ensureCfg(level, backendId = this.backendId ?? 'cuda') {
     await mkdir(this.cfgDir, { recursive: true });
     const backend = this.backends.find((b) => b.id === backendId);
     const backendParams = backend?.params ?? [];
-    const baseKey = `${engineProfileKey(level, this.fast, this.perfMode)}@${backendId}`;
-    this.tune = tuningFor({
-      mode: this.perfMode,
-      threads: this.threads,
-      engines: this.perfEngines,
-      backendId,
-    });
+    const baseKey = `${engineProfileKey(level, this.fast, this.perfMode)}@${backendId}${this._benchSuffix()}`;
+    this.tune =
+      this.tuneOverride ??
+      tuningFor({
+        mode: this.perfMode,
+        threads: this.threads,
+        engines: this.perfEngines,
+        backendId,
+      });
     const content =
       [
         ...generateCfg(level, {
@@ -152,6 +164,7 @@ export class EngineManager extends EventEmitter {
           perfMode: this.perfMode,
           perfEngines: this.perfEngines,
           backendId,
+          tune: this.tuneOverride,
         }),
         ...backendParams,
       ].join('\n') + '\n';
@@ -261,7 +274,7 @@ export class EngineManager extends EventEmitter {
   }
 
   _cfgKey(level, backendId) {
-    return `${engineProfileKey(level, this.fast, this.perfMode)}@${backendId}`;
+    return `${engineProfileKey(level, this.fast, this.perfMode)}@${backendId}${this._benchSuffix()}`;
   }
 
   /** 确保引擎处于该档位所需状态（按后端优先级逐个尝试） */

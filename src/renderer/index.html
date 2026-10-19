@@ -22,6 +22,7 @@
           <button class="mode-btn active" data-mode="play" data-i18n="mode.play">人机对弈</button>
           <button class="mode-btn" data-mode="spectate" data-i18n="mode.spectate">AI 观战</button>
           <button class="mode-btn" data-mode="review" data-i18n="mode.review">棋谱复盘</button>
+          <button class="mode-btn" data-mode="bench" data-i18n="mode.bench">跑分</button>
         </nav>
 
         <div class="settings">
@@ -112,6 +113,11 @@
               <button id="btnReviewBlunder" data-i18n="btn.reviewBlunder">下个恶手</button>
             </div>
 
+            <div class="btn-group hidden" data-mode="bench">
+              <button id="btnBenchStart" class="primary" data-i18n="bench.start">开始跑分</button>
+              <button id="btnBenchStop" data-i18n="bench.stop">停止</button>
+            </div>
+
             <button id="btnSaveSgf" data-i18n="btn.saveSgf">保存棋谱</button>
 
             <div class="spacer"></div>
@@ -190,6 +196,38 @@
             </div>
             <div class="hint" id="specSpeedHint">标准：每手 60 访问 + 间隔 300ms</div>
             <div class="hint" id="specStatus" data-i18n="spec.idle">选择双方难度后点「开始观战」</div>
+          </div>
+
+          <div class="card hidden" id="benchCard">
+            <div class="card-title" data-i18n="bench.card">跑分</div>
+            <div class="field-row">
+              <label>
+                <span data-i18n="bench.target">目标</span>
+                <select id="benchTarget">
+                  <option value="gpu" selected data-i18n="bench.gpu">GPU（显卡）</option>
+                  <option value="cpu" data-i18n="bench.cpu">CPU（处理器）</option>
+                </select>
+              </label>
+              <label><span data-i18n="bench.size">棋盘</span>
+                <select id="benchSize">
+                  <option value="19" selected>19 路</option>
+                  <option value="13">13 路</option>
+                  <option value="9">9 路</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-row">
+              <label><span data-i18n="bench.maxMoves">手数</span>
+                <input id="benchMaxMoves" type="number" value="80" min="4" max="400" />
+              </label>
+              <label><span data-i18n="bench.visits">每手访问</span>
+                <input id="benchVisits" type="number" value="200" min="10" max="4000" />
+              </label>
+            </div>
+            <div class="hint" id="benchHint" data-i18n="bench.idle">跑分固定用最吃硬件的参数（与顶栏设置无关），棋盘会跟着引擎出招飞快变化</div>
+            <div class="stat-row"><span data-i18n="bench.rate">当前手速度</span><strong id="benchRateText">—</strong></div>
+            <div class="stat-row"><span data-i18n="bench.avg">平均速度</span><strong id="benchAvgText">—</strong></div>
+            <div class="stat-row"><span data-i18n="bench.progress">进度</span><strong id="benchMoveText">—</strong></div>
           </div>
 
           <div class="card hidden" id="reviewCard">

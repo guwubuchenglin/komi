@@ -44,6 +44,16 @@ contextBridge.exposeInMainWorld('go', {
   benchmarkRun: (opts) => ipcRenderer.invoke('benchmark:run', opts),
   onBenchmarkProgress: on('benchmark:progress'),
 
+  // 跑分（棋盘可视化：真下棋，速度即成绩）
+  benchStart: (opts) => ipcRenderer.invoke('bench:start', opts),
+  benchStop: () => ipcRenderer.invoke('bench:stop'),
+  benchStatus: () => ipcRenderer.invoke('bench:status'),
+  onBenchStarted: on('bench:started'),
+  onBenchMove: on('bench:move'),
+  onBenchDone: on('bench:done'),
+  onBenchError: on('bench:error'),
+  onBenchLog: on('bench:log'),
+
   // 卸载与路径
   openUninstaller: () => ipcRenderer.invoke('app:openUninstaller'),
   revealInFolder: (target) => ipcRenderer.invoke('shell:reveal', target),

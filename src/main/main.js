@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { EngineManager } from './engineManager.js';
 import { SpectateRunner } from './spectate.js';
 import { parseSgf } from '../shared/sgf.js';
+import { gtpToIdx, xOf, yOf } from '../shared/board.js';
 import { execFile, spawn } from 'node:child_process';
 import { SystemMetrics } from './metrics.js';
 import { COMPONENTS, missingComponents, installSelected, totalBytes, componentById, cleanDownloadCache, isInstalled } from './components.js';
@@ -590,6 +591,75 @@ async function runUiFeatureTest(target) {
     await wait(600);
     const modalClosed = await js(`document.getElementById('settingsModal').classList.contains('hidden')`);
     console.log("  面板已关闭:", modalClosed);
+
+    step("跑分模式：棋盘随引擎出招飞快变化（GPU）");
+    await js(`document.querySelector('.mode-btn[data-mode="bench"]').click()`);
+    await wait(1200);
+    await js(`(function(){
+      document.getElementById('benchTarget').value = 'gpu';
+      const s = document.getElementById('benchSize');
+      s.value = '9';
+      s.dispatchEvent(new Event('change'));
+      document.getElementById('benchMaxMoves').value = '12';
+      document.getElementById('benchVisits').value = '100';
+    })()`);
+    await wait(800);
+    await js(`document.getElementById('btnBenchStart').click()`);
+    await wait(12000);
+    const benchProg1 = await js(`document.getElementById('benchMoveText').textContent`);
+    const benchRate1 = await js(`document.getElementById('benchRateText').textContent`);
+    const benchAvg1 = await js(`document.getElementById('benchAvgText').textContent`);
+    const benchUi1 = await js(`window.__state()`);
+    console.log("  跑分中:", JSON.stringify({ running: benchUi1.benchRunning, progress: benchProg1, rate: benchRate1, avg: benchAvg1 }));
+    await wait(12000);
+    const benchProg2 = await js(`document.getElementById('benchMoveText').textContent`);
+    const benchUi2 = await js(`window.__state()`);
+    console.log("  跑分进度:", JSON.stringify({ running: benchUi2.benchRunning, progress: benchProg2 }));
+    if (benchUi2.benchRunning) await js(`document.getElementById('btnBenchStop').click()`);
+    await wait(7000);
+    const benchAfter = await js(`(function(){
+      return {
+        hidden: document.getElementById('resultModal').classList.contains('hidden'),
+        title: document.getElementById('resultTitle').textContent,
+        detail: document.getElementById('resultDetail').textContent,
+        avg: document.getElementById('benchAvgText').textContent,
+      };
+    })()`);
+    console.log("  跑分结果:", JSON.stringify(benchAfter));
+    if (benchAfter.hidden) {
+      console.log("  ✗ 跑分结束没有弹出结果");
+      process.exitCode = 1;
+    }
+    if (benchProg1 === "—") {
+      console.log("  ✗ 跑分期间棋盘没有走子");
+      process.exitCode = 1;
+    }
+    await js(`document.getElementById('btnResultClose').click()`);
+    await wait(600);
+
+    step("跑分模式：CPU 目标（棋盘明显变慢）");
+    const tCpu = Date.now();
+    await js(`(function(){
+      document.getElementById('benchTarget').value = 'cpu';
+      document.getElementById('benchMaxMoves').value = '4';
+      document.getElementById('benchVisits').value = '30';
+    })()`);
+    await js(`document.getElementById('btnBenchStart').click()`);
+    await wait(50000);
+    const cpuProg = await js(`document.getElementById('benchMoveText').textContent`);
+    const cpuAvg = await js(`document.getElementById('benchAvgText').textContent`);
+    const cpuState = await js(`window.__state()`);
+    console.log("  CPU 跑分:", JSON.stringify({ running: cpuState.benchRunning, progress: cpuProg, avg: cpuAvg, seconds: Math.round((Date.now() - tCpu) / 1000) }));
+    if (cpuState.benchRunning) await js(`document.getElementById('btnBenchStop').click()`);
+    await wait(3000);
+    if (cpuProg === "—" || cpuProg === "0 / 4") {
+      console.log("  ✗ CPU 跑分没有走子");
+      process.exitCode = 1;
+    }
+    await js(`document.getElementById('btnResultClose').click()`);
+    await wait(400);
+    await js(`document.querySelector('.mode-btn[data-mode="play"]').click()`);
+    await wait(7000);
 
     step("性能模式：切换到省电再切回高吞吐（引擎重启 + 局面恢复）");
     await js(`document.querySelector('.mode-btn[data-mode="play"]').click()`);
@@ -1471,6 +1541,145 @@ app.whenReady().then(async () => {
       if (wasRunning) manager?.ensureEngine().catch(() => {});
     }
   });
+
+  // ---------------------------------------------------------------- 跑分对局（棋盘可视化）
+  // 不用 katago benchmark 的隐藏测试，而是直接对局：每手都是真实搜索，
+  // 棋盘按引擎出招速度刷新，速度本身就是成绩（visits/s）。
+  let benchRun = null;
+
+  ipcMain.handle('bench:start', async (_e, opts = {}) => {
+    if (benchRun) return { started: false, reason: '已有跑分在进行中' };
+    if (spectateBusy) return { started: false, reason: '观战/测速进行中，请先停止' };
+
+    const target = opts.target === 'cpu' ? 'cpu' : 'gpu';
+    const size = Number(opts.size ?? 19);
+    const komi = Number(opts.komi ?? 7.5);
+    const maxMoves = Math.max(4, Math.min(400, Number(opts.maxMoves ?? 80)));
+    const visits = Math.max(10, Math.min(4000, Number(opts.visits ?? 200)));
+
+    const gpuTarget = benchmarkTargets().find((t) => t.id === 'gpu');
+    if (target === 'gpu' && !gpuTarget) return { started: false, reason: '没有可用的 GPU 后端' };
+    const backendId = target === 'cpu' ? 'cpu' : (gpuTarget?.backendId ?? 'cuda');
+    const tune = benchmarkTuning({ backendId, target, cores: os.cpus().length });
+
+    const mgr = new EngineManager({
+      rootDir: APP_ROOT,
+      dataDir: DATA_DIR,
+      engineRoot: ENGINE_ROOT,
+      threads: tune.numSearchThreads,
+      perfMode: PERF.PERFORMANCE,
+      perfEngines: 1,
+      backendMode: target === 'cpu' ? 'cpu' : 'gpu',
+      tuneOverride: tune,
+      trackHistory: false,
+    });
+    mgr.on('log', (line) => send('bench:log', line));
+
+    benchRun = { mgr, aborted: false, target, backendId, size, visits, maxMoves, tune };
+
+    (async () => {
+      let moves = 0;
+      let totalMs = 0;
+      let best = 0;
+      const t0 = Date.now();
+      try {
+        // 跑分要独占硬件：先把常驻引擎和观战引擎停掉
+        await manager?.shutdown().catch(() => {});
+        await spectate?.shutdown().catch(() => {});
+        send('bench:log', '已暂停常驻引擎，跑分独占硬件');
+
+        await mgr.setLevel('lv8');
+        await mgr.newGame({ size, komi, levelId: 'lv8' });
+        const e = await mgr.ensureEngine();
+        await e.command(`kata-set-param maxVisits ${visits}`, 20000).catch(() => {});
+        await e.command(`kata-set-param maxTime 30.0`, 20000).catch(() => {});
+
+        send('bench:started', {
+          target,
+          backendId,
+          backendLabel: mgr.backendLabel ?? backendId,
+          threads: tune.numSearchThreads,
+          batch: tune.nnMaxBatchSize,
+          nnServer: tune.numNNServerThreadsPerModel,
+          visits,
+          maxMoves,
+          size,
+        });
+
+        for (let i = 0; i < maxMoves && !benchRun?.aborted; i++) {
+          const color = i % 2 === 0 ? 'B' : 'W';
+          const r = await mgr.genmove(color);
+          if (benchRun?.aborted) break;
+          const coord = String(r.move ?? '').trim();
+          if (!coord || /^resign$/i.test(coord)) break;
+
+          const ms = Math.max(1, r.elapsedMs);
+          const rate = (visits / ms) * 1000;
+          // 极短的一手（树复用/终局）会让瞬时速度虚高，不计入「最快」
+          const reliable = ms >= 40;
+          if (reliable) best = Math.max(best, rate);
+          totalMs += ms;
+          moves = i + 1;
+
+          const isPass = /^pass$/i.test(coord);
+          const idx = isPass ? -1 : gtpToIdx(coord, size);
+          send('bench:move', {
+            moveNumber: moves,
+            color,
+            pass: isPass,
+            gtp: coord,
+            x: idx >= 0 ? xOf(idx, size) : null,
+            y: idx >= 0 ? yOf(idx, size) : null,
+            elapsedMs: ms,
+            rate: reliable ? rate : null,
+            avgRate: (visits * moves) / (totalMs / 1000),
+            bestRate: best,
+            winrate: r.winrate,
+            maxMoves,
+          });
+        }
+
+        const elapsedMs = Date.now() - t0;
+        const avgRate = moves ? (visits * moves) / (totalMs / 1000) : 0;
+        send('bench:done', {
+          target,
+          backendId,
+          backendLabel: mgr.backendLabel ?? backendId,
+          moves,
+          maxMoves,
+          visits,
+          avgRate,
+          bestRate: best,
+          elapsedMs,
+          threads: tune.numSearchThreads,
+          batch: tune.nnMaxBatchSize,
+          aborted: Boolean(benchRun?.aborted),
+        });
+      } catch (err) {
+        send('bench:error', { message: err.message ?? String(err) });
+      } finally {
+        const wasAborted = Boolean(benchRun?.aborted);
+        benchRun = null;
+        await mgr.shutdown().catch(() => {});
+        // 跑完再按用户设置把常驻引擎拉回来
+        manager?.ensureEngine().catch(() => {});
+        if (!wasAborted && moves === 0) send('bench:error', { message: '跑分没有产生任何着法' });
+      }
+    })();
+
+    return { started: true, target, backendId, tune, visits, maxMoves };
+  });
+
+  ipcMain.handle('bench:stop', async () => {
+    if (benchRun) benchRun.aborted = true;
+    return { ok: true };
+  });
+
+  ipcMain.handle('bench:status', () => ({
+    running: Boolean(benchRun),
+    target: benchRun?.target ?? null,
+    maxMoves: benchRun?.maxMoves ?? null,
+  }));
 
   ipcMain.handle('shell:reveal', async (_e, target) => {
     const p = target === 'uninstaller' ? uninstallerPath() : target === 'engineRoot' ? ENGINE_ROOT : null;

@@ -16,9 +16,10 @@
   const KOMI_BY_SIZE = { 9: 7, 13: 7, 19: 7.5 };
 
   const S = {
-    mode: "play", // play | spectate | review
+    mode: "play", // play | spectate | review | bench
     settings: null,
     spectate: { running: false, paused: false },
+    bench: { running: false, best: 0 },
     stopRequested: false,
     policies: { B: null, W: null },
     policyShown: null,
@@ -175,6 +176,31 @@
     el("btnSpectateStop").addEventListener("click", stopSpectate);
     el("btnMatch").addEventListener("click", onMatchStart);
 
+    // 跑分（棋盘可视化）
+    el("btnBenchStart").addEventListener("click", onBenchStart);
+    el("btnBenchStop").addEventListener("click", stopBench);
+    el("benchSize").addEventListener("change", () => {
+      if (!S.bench.running) resetBenchBoard();
+    });
+    window.__benchReset = () => resetBenchBoard();
+    api.onBenchStarted((info) => {
+      el("benchHint").textContent =
+        `${info.backendLabel ?? info.backendId} · ${info.threads} 线程 / batch ${info.batch} / NN×${info.nnServer}` +
+        ` · 每手 ${info.visits} 访问`;
+      log(`跑分引擎就绪：${info.backendLabel ?? info.backendId}（${info.threads} 线程 / batch ${info.batch}）`);
+      S.bench.running = true;
+      updateButtons();
+    });
+    api.onBenchMove((ev) => onBenchMoveEvent(ev));
+    api.onBenchDone((r) => onBenchDone(r));
+    api.onBenchError((e) => {
+      S.bench.running = false;
+      updateButtons();
+      log("跑分失败：" + (e?.message ?? "未知错误"));
+      el("benchMoveText").textContent = "失败";
+    });
+    if (api.onBenchLog) api.onBenchLog((line) => log(line));
+
     // 复盘
     el("btnOpenSgf").addEventListener("click", () => onOpenSgf());
     window.__openSgf = onOpenSgf; // 测试钩子
@@ -192,6 +218,9 @@
       reviewTimeline: S.review?.timeline?.length ?? null,
       reviewBlunders: S.review?.blunders?.length ?? null,
       spectateRunning: S.spectate.running,
+      benchRunning: S.bench?.running ?? false,
+      benchRate: el("benchRateText")?.textContent ?? null,
+      benchProgress: el("benchMoveText")?.textContent ?? null,
       policyB: S.policies.B ? S.policies.B.candidates.length : 0,
       policyW: S.policies.W ? S.policies.W.candidates.length : 0,
     });
@@ -641,7 +670,7 @@
     const isReview = S.mode === "review" && S.review?.timeline;
     if (isReview) {
       el("turnText").textContent = isEn() ? `Move ${S.review.index}` : `第 ${S.review.index} 手`;
-    } else if (S.mode === "spectate") {
+    } else if (S.mode === "spectate" || S.mode === "bench") {
       el("turnText").textContent = `${colorWord(S.game.turn)}${isEn() ? " (AI)" : "（AI）"}`;
     } else {
       const me = S.game.turn === S.humanColor;
@@ -840,6 +869,10 @@
     el("btnSpectateStop").disabled = !specRunning;
     el("btnMatch").disabled = specRunning;
     el("btnSpectatePause").textContent = S.spectate.paused ? T("btn.spectateResume") : T("btn.spectatePause");
+
+    const benchRunning = Boolean(S.bench?.running);
+    if (el("btnBenchStart")) el("btnBenchStart").disabled = benchRunning;
+    if (el("btnBenchStop")) el("btnBenchStop").disabled = !benchRunning;
   }
 
   // ------------------------------------------------------------------ 绘制
@@ -1744,16 +1777,21 @@
     }
     el("spectateCard").classList.toggle("hidden", mode !== "spectate");
     el("reviewCard").classList.toggle("hidden", mode !== "review");
+    el("benchCard").classList.toggle("hidden", mode !== "bench");
     el("levelWrap").classList.toggle("hidden", mode !== "play");
-    el("handicapWrap").classList.toggle("hidden", mode === "review");
-    el("candidatesTitle").textContent = T(`candidatesTitle.${mode}`);
+    el("handicapWrap").classList.toggle("hidden", mode === "review" || mode === "bench");
+    el("candidatesTitle").textContent =
+      mode === "bench" ? (isEn() ? "Benchmark candidates" : "跑分候选点") : T(`candidatesTitle.${mode}`);
     el("chartTitle").textContent = mode === "review" ? T("chartTitle.review") : T("chartTitle.play");
     el("modeBadge").classList.toggle("hidden", mode === "play");
     if (mode === "spectate") el("modeBadge").textContent = isEn() ? "Spectating" : "观战模式";
     if (mode === "review") el("modeBadge").textContent = isEn() ? "Review mode" : "复盘模式";
+    if (mode === "bench") el("modeBadge").textContent = isEn() ? "Benchmark" : "跑分模式";
 
     if (mode !== "spectate" && S.spectate.running) stopSpectate();
+    if (mode !== "bench" && S.bench.running) stopBench();
     if (mode === "spectate") resetSpectateBoard();
+    if (mode === "bench") resetBenchBoard();
     if (mode === "play") {
       S.review = null;
       onNewGame();
@@ -1938,6 +1976,112 @@
     renderCandidates();
     el("turnText").textContent = `${S.game.turn === R.BLACK ? "黑" : "白"}（AI）`;
     updateButtons();
+  }
+
+  // ================================================================== 跑分（棋盘可视化）
+  function resetBenchBoard({ fromUi = true } = {}) {
+    S.bench.running = false;
+    const size = fromUi ? Number(el("benchSize").value) || 19 : S.size;
+    S.size = size;
+    el("sizeSelect").value = String(size);
+    S.komi = KOMI_BY_SIZE[size] ?? 7.5;
+    el("komiInput").value = String(S.komi);
+    S.game = R.createState(size, { komi: S.komi });
+    S.ended = false;
+    S.busy = false;
+    S.candidates = [];
+    S.ownership = null;
+    S.winrateHist = [];
+    S.lastAiMove = null;
+    S.policies = { B: null, W: null };
+    S.policyShown = null;
+    S.bench.best = 0;
+    setupCanvas();
+    draw();
+    renderStats();
+    renderCandidates();
+    el("benchRateText").textContent = "—";
+    el("benchAvgText").textContent = "—";
+    el("benchMoveText").textContent = "—";
+    updateButtons();
+  }
+
+  async function onBenchStart() {
+    resetBenchBoard();
+    const opts = {
+      target: el("benchTarget").value === "cpu" ? "cpu" : "gpu",
+      size: S.size,
+      komi: S.komi,
+      maxMoves: Number(el("benchMaxMoves").value) || 80,
+      visits: Number(el("benchVisits").value) || 200,
+    };
+    S.bench.running = true;
+    updateButtons();
+    el("benchMoveText").textContent = `0 / ${opts.maxMoves}`;
+    log(
+      `开始跑分：${opts.target.toUpperCase()} · ${opts.size} 路 · 每手 ${opts.visits} 访问 · ${opts.maxMoves} 手`,
+    );
+    try {
+      const res = await api.benchStart(opts);
+      if (!res.started) {
+        S.bench.running = false;
+        updateButtons();
+        log("无法开始跑分：" + (res.reason ?? "未知原因"));
+      }
+    } catch (err) {
+      S.bench.running = false;
+      updateButtons();
+      log("跑分启动失败：" + err.message);
+    }
+  }
+
+  async function stopBench() {
+    S.bench.running = false;
+    updateButtons();
+    try {
+      await api.benchStop();
+    } catch {
+      /* ignore */
+    }
+    el("benchMoveText").textContent = "已停止";
+  }
+
+  function onBenchMoveEvent(ev) {
+    if (!S.game) return;
+    if (ev.pass) {
+      S.game = R.playPass(S.game).state;
+    } else {
+      const r = R.playMove(S.game, ev.x, ev.y);
+      if (r.ok) S.game = r.state;
+    }
+    S.lastAiMove = { color: ev.color === "B" ? R.BLACK : R.WHITE, x: ev.x, y: ev.y };
+    if (typeof ev.winrate === "number") {
+      const blackWin = ev.color === "B" ? ev.winrate : 1 - ev.winrate;
+      S.winrateHist.push({ move: ev.moveNumber, blackWin });
+    }
+    S.bench.best = ev.bestRate ?? S.bench.best;
+    el("benchRateText").textContent =
+      typeof ev.rate === "number" ? `${ev.rate.toFixed(0)} visits/s` : `—（树复用，${ev.elapsedMs}ms）`;
+    el("benchAvgText").textContent = `${ev.avgRate.toFixed(0)} visits/s（最快 ${S.bench.best.toFixed(0)}）`;
+    el("benchMoveText").textContent = `${ev.moveNumber} / ${ev.maxMoves} · ${ev.elapsedMs}ms`;
+    draw();
+    renderStats();
+    updateButtons();
+  }
+
+  function onBenchDone(r) {
+    S.bench.running = false;
+    updateButtons();
+    const head = r.aborted ? "跑分已停止" : "跑分完成";
+    const detail =
+      `${r.backendLabel ?? r.target} · ${r.threads} 线程 / batch ${r.batch}\n` +
+      `走了 ${r.moves} 手（上限 ${r.maxMoves}），每手 ${r.visits} 访问\n` +
+      `平均 ${r.avgRate.toFixed(0)} visits/s　最快 ${r.bestRate.toFixed(0)} visits/s\n` +
+      `总耗时 ${(r.elapsedMs / 1000).toFixed(1)}s`;
+    el("benchAvgText").textContent = `${r.avgRate.toFixed(0)} visits/s（最快 ${r.bestRate.toFixed(0)}）`;
+    el("benchMoveText").textContent = `${r.moves} / ${r.maxMoves}`;
+    log(`${head}：${r.avgRate.toFixed(0)} visits/s（最快 ${r.bestRate.toFixed(0)}）`);
+    modal(head, detail);
   }
 
   // ================================================================== 棋谱复盘
