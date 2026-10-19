@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+﻿import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
@@ -635,7 +635,7 @@ async function runUiFeatureTest(target) {
     const modalClosed = await js(`document.getElementById('settingsModal').classList.contains('hidden')`);
     console.log("  面板已关闭:", modalClosed);
 
-    step("压测模式：完整对局，一盘算一局（GPU，测试用短时长提速）");
+    step("基准跑分：完整对局，一盘算一局（GPU，测试用短时长提速）");
     await js(`document.querySelector('.mode-btn[data-mode="bench"]').click()`);
     await wait(1200);
     await js(`(function(){
@@ -681,7 +681,7 @@ async function runUiFeatureTest(target) {
     await js(`document.getElementById('btnResultClose').click()`);
     await wait(600);
 
-    step("压测模式：CPU 目标 + 选难度（拟人档，验证难度生效）");
+    step("基准跑分：CPU 目标 + 选难度（拟人档，验证难度生效）");
     const tCpu = Date.now();
     await js(`(function(){
       document.getElementById('benchTarget').value = 'cpu';
@@ -1653,7 +1653,7 @@ app.whenReady().then(async () => {
         send('bench:log', '已暂停常驻引擎，跑分独占硬件');
 
         await mgr.setLevel(level.id);
-        // 拟人档会带延迟，压测要关掉，否则测到的是"等"而不是算
+        // 拟人档会带延迟，跑分要关掉，否则测到的是"等"而不是算
         mgr.setFast(true);
         const e = await mgr.ensureEngine();
         // 固定时长搜索：每手连续算满 budget 秒，中间没有空档，显卡持续满载

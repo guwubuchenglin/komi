@@ -1,4 +1,4 @@
-/* 围棋 · 内置 KataGo —— 渲染进程主逻辑（经典脚本，依赖 rules.global.js） */
+﻿/* 围棋 · 内置 KataGo —— 渲染进程主逻辑（经典脚本，依赖 rules.global.js） */
 (function () {
   "use strict";
 
@@ -189,7 +189,7 @@
         `${info.backendLabel ?? info.backendId} · ${info.threads} 线程 / batch ${info.batch} / NN×${info.nnServer}` +
         ` · 每手连续搜索 ${info.timeSec}s（满载）` +
         (info.levelLabel ? ` · 难度 ${info.levelLabel}` : "");
-      log(`压测引擎就绪：${info.backendLabel ?? info.backendId}（${info.threads} 线程 / batch ${info.batch}）`);
+      log(`跑分引擎就绪：${info.backendLabel ?? info.backendId}（${info.threads} 线程 / batch ${info.batch}）`);
       S.bench.running = true;
       updateButtons();
     });
@@ -199,7 +199,7 @@
     api.onBenchError((e) => {
       S.bench.running = false;
       updateButtons();
-      log("压测失败：" + (e?.message ?? "未知错误"));
+      log("跑分失败：" + (e?.message ?? "未知错误"));
       el("benchMoveText").textContent = "失败";
     });
     if (api.onBenchLog) api.onBenchLog((line) => log(line));
@@ -2034,19 +2034,19 @@
     updateButtons();
     el("benchMoveText").textContent = `0 / ${opts.games} 局`;
     log(
-      `开始压测：${opts.target.toUpperCase()} · ${opts.size} 路 · ${opts.games} 局 · 难度 ${levelLabel(opts.levelId)}（满载参数）`,
+      `开始跑分：${opts.target.toUpperCase()} · ${opts.size} 路 · ${opts.games} 局 · 难度 ${levelLabel(opts.levelId)}（满载参数）`,
     );
     try {
       const res = await api.benchStart(opts);
       if (!res.started) {
         S.bench.running = false;
         updateButtons();
-        log("无法开始压测：" + (res.reason ?? "未知原因"));
+        log("无法开始跑分：" + (res.reason ?? "未知原因"));
       }
     } catch (err) {
       S.bench.running = false;
       updateButtons();
-      log("压测启动失败：" + err.message);
+      log("跑分启动失败：" + err.message);
     }
   }
 
@@ -2108,7 +2108,7 @@
   function onBenchDone(r) {
     S.bench.running = false;
     updateButtons();
-    const head = r.aborted ? "压测已停止" : "压测完成";
+    const head = r.aborted ? "跑分已停止" : "跑分完成";
     const gameLines = (r.gameResults ?? [])
       .map(
         (g) =>

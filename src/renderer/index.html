@@ -22,7 +22,7 @@
           <button class="mode-btn active" data-mode="play" data-i18n="mode.play">人机对弈</button>
           <button class="mode-btn" data-mode="spectate" data-i18n="mode.spectate">AI 观战</button>
           <button class="mode-btn" data-mode="review" data-i18n="mode.review">棋谱复盘</button>
-          <button class="mode-btn" data-mode="bench" data-i18n="mode.bench">压测</button>
+          <button class="mode-btn" data-mode="bench" data-i18n="mode.bench">基准跑分</button>
         </nav>
 
         <div class="settings">
@@ -114,7 +114,7 @@
             </div>
 
             <div class="btn-group hidden" data-mode="bench">
-              <button id="btnBenchStart" class="primary" data-i18n="bench.start">开始压测</button>
+              <button id="btnBenchStart" class="primary" data-i18n="bench.start">开始跑分</button>
               <button id="btnBenchStop" data-i18n="bench.stop">停止</button>
             </div>
 
@@ -199,7 +199,7 @@
           </div>
 
           <div class="card hidden" id="benchCard">
-            <div class="card-title" data-i18n="bench.card">压测对局</div>
+            <div class="card-title" data-i18n="bench.card">基准跑分</div>
             <div class="field-row">
               <label>
                 <span data-i18n="bench.target">目标</span>
@@ -224,7 +224,7 @@
                 <input id="benchGames" type="number" value="1" min="1" max="20" />
               </label>
             </div>
-            <div class="hint" id="benchHint" data-i18n="bench.idle">压测按极限压榨的满载参数跑完整对局（一盘算一局），棋盘会跟着引擎出招飞快变化</div>
+            <div class="hint" id="benchHint" data-i18n="bench.idle">基准跑分按极限压榨的满载参数跑完整对局（一盘算一局），棋盘会跟着引擎出招飞快变化</div>
             <div class="stat-row"><span data-i18n="bench.rate">当前手速度</span><strong id="benchRateText">—</strong></div>
             <div class="stat-row"><span data-i18n="bench.avg">平均速度</span><strong id="benchAvgText">—</strong></div>
             <div class="stat-row"><span data-i18n="bench.progress">进度</span><strong id="benchMoveText">—</strong></div>
